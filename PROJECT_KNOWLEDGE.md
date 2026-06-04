@@ -1,0 +1,247 @@
+# CATS Community Chat — Project Knowledge
+
+This is the operating manual and current state for the custom community chat built for
+the MHMS / CATS cohort program. Drop this whole folder into the project as knowledge so
+any new conversation starts with full context. **Current version: v32 (live in production).**
+
+---
+
+## What this is
+
+A custom multi-channel community chat for a paid 20-student cohort ("CATS Program"),
+embedded in a Squarespace course site. Built with the Stream Chat React SDK, bundled with
+webpack, hosted on GitHub Pages, and embedded as an iframe in Squarespace. Two Cloudflare
+Workers handle authentication tokens and email notifications.
+
+It is LIVE with real students. Treat every change as a production change.
+
+---
+
+## Architecture
+
+**Chat bundle (the app itself)**
+- React app built with webpack into a single self-contained bundle plus a few lazy chunks.
+- Hosted on GitHub Pages at `https://jcoutdoors.github.io/mhms-chat/` (repo `mhms-chat`, personal GitHub account `jcoutdoors`).
+- Embedded in Squarespace via an iframe at `https://www.mentalhealthmadesimple.life/catscourse#community`.
+- Why bundled this way: Squarespace blocks external CDN scripts and ES modules, so React, stream-chat, and stream-chat-react are all pre-bundled into one file and loaded from GitHub Pages inside an iframe.
+
+**Stream Chat app**
+- App name: "MHMS Cohort"
+- App ID: `1613783`
+- Public API key: `9bdsdh9s956e`  (safe to expose; this is the client key)
+- Region: us-east
+- Mode: Production (not dev)
+- The Stream SECRET (used to sign tokens) lives only in the token worker's env. It is NOT in the app and NOT in this document.
+
+**Token Worker (Cloudflare)**
+- Name: `mhms-chat-token`
+- URL: `https://mhms-chat-token.jonathan-5ad.workers.dev`
+- Generates HS256 JWT user tokens. Takes `?user_id=`, returns `{ token }`.
+- Env var: `STREAM_SECRET` (Secret).
+- Source: `cloudflare-workers/token-worker.js`
+
+**Notification Worker (Cloudflare)**
+- Name: `cats-notifications`
+- URL: `https://cats-notifications.jonathan-5ad.workers.dev`
+- Receives Stream `message.new` webhook events, sends email via Resend.
+- Env var: `RESEND_API_KEY` (Secret).
+- From address: `no-reply@notifications.nexgenrva.com` (verified subdomain in Resend).
+- Routing: `@mark` / `@dr. mayfield` → emails `dr.mark.mayfield@gmail.com`; `@support` / `@help` → emails `jonathan@nexgenrva.com`.
+- Stream webhook is configured under Stream Dashboard > Overview > Webhook & Event Configuration, subscribed only to `message.new`.
+- Source: `cloudflare-workers/notification-worker.js`
+
+**Cloudflare account**
+- Account: Jonathan@nexgenrva.com
+- Subdomain: `jonathan-5ad.workers.dev`
+
+> **Security note:** The Resend API key and the Stream secret appeared in the original
+> build conversation. They are intentionally NOT stored in this document. They live only
+> in the respective Cloudflare worker env vars. Consider rotating the Resend key at some
+> point as hygiene. Never paste secrets into project files.
+
+---
+
+## Build & deploy workflow
+
+This is the loop for every change. Follow it exactly.
+
+1. Edit `source/index.jsx`.
+2. From the project root with dependencies installed: `npx webpack` (builds into `dist/`). Build takes ~40s.
+3. Recreate `dist/index.html` (the wrapper that loads `./chat.bundle.js`). The wrapper is simple and static; its contents are in this doc below.
+4. Webpack emits 5 files that ALL must be uploaded to GitHub together: `index.html`, `chat.bundle.js`, and three numbered chunk files like `387.chunk.js`, `760.chunk.js`, `893.chunk.js`. The chunk numbers/names can change between builds.
+5. In the `mhms-chat` GitHub repo: delete the old files first, then upload all 5 new files.
+6. Wait ~2 minutes for GitHub Pages to deploy, then hard refresh.
+
+**Build dependencies:** see `source/package.json`. Key versions: react 18, stream-chat 8, stream-chat-react 11, webpack 5, babel with preset-env + preset-react.
+
+**Webpack config:** see `source/webpack.config.js`.
+
+**The dist/index.html wrapper:**
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CATS Program Community</title>
+  <style>* { margin: 0; padding: 0; box-sizing: border-box; } html, body { height: 100%; width: 100%; overflow: hidden; } #root { height: 100vh; width: 100%; }</style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="./chat.bundle.js"></script>
+</body>
+</html>
+```
+
+**Healthy bundle check:** `chat.bundle.js` should be roughly 1.8MB. If it is wildly larger
+or the line count of `index.jsx` is in the hundreds of thousands, the source file is
+corrupted (see hard lesson below). Verify a distinctive term appears only a handful of
+times: `grep -o "queryUsers" dist/chat.bundle.js | wc -l` should return a single-digit
+number, not thousands.
+
+---
+
+## HARD LESSON: file corruption (read before editing)
+
+During the original build, a bad find-and-replace matched thousands of times and ballooned
+`index.jsx` to ~1.9 MILLION lines / 63MB. Every "fix" after that compiled fine but built on
+the corrupted file, so changes never reached the deployed bundle. This caused a long stretch
+of "fixes that did nothing." The fix was to delete the file and rebuild it clean.
+
+Rules to avoid repeating it:
+- Never do large repeated `str_replace` operations that could match many times.
+- After any significant edit, verify: `wc -l source/index.jsx` (should be ~1,100 lines, not millions) and `du -h dist/chat.bundle.js` (~1.8MB).
+- A quick brace-balance script that ignores strings/comments is useful. Note: the `ProfileCard` function body `{` and its `return (` always show as 2 false-positive "unclosed" entries because the checker is JSX-blind. A THIRD entry indicates a real bug.
+
+---
+
+## Channels (sidebar structure)
+
+Defined in `CHANNEL_GROUPS` in `index.jsx`.
+
+**Start Here**
+- `cats-getting-started` — "📖 Getting Started" — a STATIC wiki page, not a Stream channel. Rendered by the `GettingStartedWiki` component. Listed in `STATIC_CHANNELS`.
+- `cats-announcements` — "📣 Announcements" — read-only for non-instructors.
+
+**Course Modules**
+- `cats-mod-01` … `cats-mod-10`, named e.g. "Mod 1 · Development & Neuroscience", "Mod 2 · Attachment Theory", "Mod 3 · Trauma, ACEs & PTSD", "Mod 4 · Therapeutic Presence", "Mod 5 · CBT, DBT & ACT", "Mod 6 · TF-CBT, EMDR & MI", "Mod 7 · Crisis Intervention", "Mod 8 · Family Systems", "Mod 9 · Identity, Culture & Tech", "Mod 10 · Supervised Practice".
+
+**Community**
+- `cats-general` — "General" — default landing channel.
+- `cats-weekly-wins` — "Weekly Wins"
+- `cats-readings` — "Readings & Resources"
+
+Key constants in code:
+- `ALL_CHANNELS` = all channels EXCEPT those in `STATIC_CHANNELS` (the wiki is not a Stream channel).
+- `STATIC_CHANNELS = ['cats-getting-started']`
+- `ANNOUNCEMENTS_ID = 'cats-announcements'`, `GETTING_STARTED_ID = 'cats-getting-started'`
+- `canPostAnnouncements(userId)` checks `ANNOUNCER_PREFIXES = ['cats-mark','cats-mayfield','cats-jonathan','jonathan']`. This same check gates who can use `@everyone`.
+
+---
+
+## Features built and live (as of v32)
+
+**Profiles** — first/last name, optional bio, optional website/LinkedIn, 12-color avatar picker. Setup modal on first visit, editable from the sidebar footer. Stored in `localStorage` under `cats_profile` and upserted to Stream.
+
+**Messaging UI** — white premium UI, DM Sans font, colored initial-avatars. Custom message component: full name above bubble, own messages right/blue, others left/gray. Click name/avatar to open a profile card.
+
+**Threads** — hover a message → Reply → opens a thread panel. Shows "N replies" under the original.
+
+**Pins** — hover → 📌 to pin/unpin. Pinned messages show a yellow "Pinned" tag.
+
+**Reactions** — hover → 😊 picker (👍 ❤️ 😄 😮 😢). Reaction pills with counts under the message; click a pill to toggle your own.
+
+**Edit / delete own messages** — hover your own message → ✏️ (inline edit, Enter to save / Esc to cancel, shows "edited") or 🗑 (confirm, then "This message was deleted").
+
+**Emoji picker** — smiley button left of the message box. Loaded from CDN at runtime (`cdn.jsdelivr.net/npm/emoji-mart@5`) to avoid webpack bundling issues that caused React errors.
+
+**Mentions with autocomplete** — type `@` → dropdown of cohort members. `@everyone` option only shows for instructors (`canPostAnnouncements`). Mentions render highlighted blue in messages via `renderTextWithMentions()` using `memberNameRegistry`.
+
+**Mention alerts** — when mentioned (or `@everyone` from an instructor), the user gets: a red `@` badge on the channel, a browser notification (one-time permission request), and a soft chime (Web Audio). Fired from the client `message.new` / `notification.message_new` listeners. Skips your own messages.
+
+**Email routing (via notification worker)** — `@mark` / `@dr. mayfield` → Mark's email; `@support` / `@help` → Jonathan's email. Independent of the in-chat alerts.
+
+**Getting Started wiki** — static formatted read-only page. Sections: Channels, Announcements, Posting & replying, Mentions, Reaching the instructor (@mark), Tech help & support (@support/@help), Notifications, Searching messages, Sharing files, Need help.
+
+**Unread / mention badges** — blue number = unread count, red `@` = mention. Clears on opening the channel.
+
+**Members list** — full roster via `chatClient.queryUsers` with presence. Green dot = online, gray = offline. Refreshes every ~6s and on presence events. Also feeds `memberNameRegistry` for mention highlighting and the autocomplete roster.
+  - Root cause of an earlier long bug: Stream only pushes `watcher_count`, not watcher objects, by default. The roster is built from `queryUsers` (presence) plus channel watchers/members as fallback, plus the connected user.
+
+**Message search** — 🔍 icon at top-right of each channel opens a search box. Uses `channel.search()` to find messages within that channel. Results show sender, text, date. Scoped to the active channel (not global) for simplicity and reliability.
+
+**Date dividers** — Stream's date separators between messages from different days, styled to match.
+
+**Jump to latest** — scroll-to-bottom button appears when scrolled up, styled in brand blue.
+
+**Deep linking** — `getInitialChannelId()` reads a `?channel=` param or hash; defaults to `cats-general`.
+
+**Announcements read-only** — for non-instructors the input is replaced with a notice directing them to General.
+
+---
+
+## Stream permissions (configured in Stream dashboard)
+
+For the `user` role and `.app` scope, these are enabled: CreateMessage, CreateChannel,
+ReadChannel, ReadChannelMembers, SendMessage, CreateReply, CreateReaction, UploadAttachment,
+AddOwnChannelMembership, PinMessage (own), and on the `.app` scope: Query Users (SearchUser).
+If reactions, uploads, or user search ever break, re-check these.
+
+> Note: announcements read-only is currently enforced in the UI (the input is hidden for
+> non-instructors). For true server-side lockdown you would also set channel-level
+> permissions in Stream. The UI gating covers normal use.
+
+---
+
+## Known quirks
+
+- **Stale localStorage / deleted users:** If a browser has an old `cats_profile` pointing to a Stream user that was deleted, you get "WS failed code 16 user was deleted". Fix in that browser only: `localStorage.removeItem('cats_profile')` in the console, then refresh. Nothing server-side.
+- **Per-context localStorage:** Each access context (standalone URL vs iframe) has its own localStorage. This is why all access is routed through the one Squarespace URL, so there is a single profile-setup context.
+- **`jonathan822`** is a protected/undeletable original Stream account; harmless.
+- **Notifications + sound** only fire for messages from OTHER users, and the browser asks permission once. To test, use a second browser / incognito window as a second user.
+
+---
+
+## Roadmap (not yet built)
+
+Priority order, with the two flagship items deliberately saved for their own focused builds:
+
+1. **Mobile responsiveness** (recommended next) — the 240px sidebar next to the chat is cramped on phones. Needs a collapsible sidebar, hamburger toggle, responsive widths. Touches a lot of UI, so it gets its own careful pass. Affects real students daily.
+2. **Direct messaging** — 1:1 channels (Stream supports natively). Real UI build: DM list, start-a-DM, unread handling. The biggest remaining feature; its own project.
+
+Smaller polish, slot in anytime:
+- **Message grouping** — collapse consecutive messages from one person to show name/avatar once. Low effort, visual.
+- **Link previews** — unfurl pasted URLs into title/thumbnail. Medium effort. Nice for Readings.
+
+Parked unless a need appears:
+- **Profile photo uploads** — needs an image backend (e.g. Cloudflare R2).
+- **Weekly digest email to Mark** — a scheduled (cron) job.
+
+Dropped: calendar feature.
+
+**Working principle agreed with Jonathan:** the Getting Started wiki is the single source of
+truth for how the chat works. Any user-facing feature we ship gets documented in the wiki in
+the same build. Behind-the-scenes mechanics (worker internals, instructor-gating logic) do
+not go in the wiki.
+
+---
+
+## Jonathan's universal output rules (apply to all copy and writing)
+
+- No em-dashes, ever. Use periods, commas, parentheses, or rephrase.
+- No fabricated stories or anecdotes.
+- No "most leaders" or other AI-sounding filler.
+- Copy should sound like something Jonathan would actually say.
+- Brand voice: Gary Vee directness + Mr. Rogers warmth + a comedian's timing.
+
+---
+
+## File inventory in this project package
+
+- `PROJECT_KNOWLEDGE.md` — this document.
+- `source/index.jsx` — the complete current app source (v32). The real working file.
+- `source/webpack.config.js` — webpack build config.
+- `source/package.json` — dependencies and versions.
+- `cloudflare-workers/token-worker.js` — the JWT token worker (`mhms-chat-token`).
+- `cloudflare-workers/notification-worker.js` — the email worker (`cats-notifications`), current deployed version.
+- `SETUP.md` — how to rebuild the environment from scratch and the exact deploy steps.
