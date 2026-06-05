@@ -1066,6 +1066,7 @@ function App() {
         .str-chat__channel-header-title{font-family:'DM Sans',sans-serif!important;font-weight:500!important;font-size:15px!important;color:#1a1a1a!important}
         .str-chat__channel-header-info{font-family:'DM Sans',sans-serif!important;font-size:12px!important;color:#999!important}
         .str-chat__channel-header-menu-button{display:none!important}
+        .str-chat__header-hamburger{display:none!important}
         .str-chat__message-input{border-top:none!important;background:transparent!important;padding:0!important;box-shadow:none!important}
         .str-chat__message-textarea-react-host textarea,.str-chat__message-textarea{font-family:'DM Sans',sans-serif!important;font-size:14px!important;border-radius:8px!important;border:1px solid #e0e0e0!important;background:#fafafa!important;padding:10px 14px!important}
         .str-chat__message-textarea-react-host textarea:focus,.str-chat__message-textarea:focus{border-color:#3b73d8!important;background:#fff!important;outline:none!important;box-shadow:0 0 0 3px rgba(59,115,216,0.08)!important}
