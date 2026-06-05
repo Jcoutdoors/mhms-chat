@@ -589,12 +589,26 @@ function MembersList({ chatClient, activeChannel, currentUserId }) {
   );
 }
 
-function Sidebar({ groups, activeId, onSelect, currentUser, chatClient, activeChannel, onEditProfile, unreadCounts = {}, mentionCounts = {} }) {
+function Sidebar({ groups, activeId, onSelect, currentUser, chatClient, activeChannel, onEditProfile, unreadCounts = {}, mentionCounts = {}, isMobile = false, mobileNavOpen = false, onCloseMobileNav }) {
   const name = currentUser?.name || '';
   const color = currentUser?.color || '#3b73d8';
 
+  const baseStyle = { width: 240, minWidth: 240, background: '#f9f9f9', borderRight: '1px solid #ebebeb', display: 'flex', flexDirection: 'column', fontFamily: "'DM Sans', sans-serif", overflowY: 'auto' };
+  const mobileStyle = isMobile ? {
+    position: 'fixed', top: 0, left: 0, height: '100vh', zIndex: 1100,
+    transform: mobileNavOpen ? 'translateX(0)' : 'translateX(-100%)',
+    transition: 'transform 0.25s ease', boxShadow: mobileNavOpen ? '2px 0 24px rgba(0,0,0,0.18)' : 'none',
+  } : {};
+
   return (
-    <div style={{ width: 240, minWidth: 240, background: '#f9f9f9', borderRight: '1px solid #ebebeb', display: 'flex', flexDirection: 'column', fontFamily: "'DM Sans', sans-serif", overflowY: 'auto' }}>
+    <React.Fragment>
+      {isMobile && mobileNavOpen && (
+        <div onClick={onCloseMobileNav} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 1099 }} />
+      )}
+      <div style={{ ...baseStyle, ...mobileStyle }}>
+        {isMobile && (
+          <button onClick={onCloseMobileNav} style={{ position: 'absolute', top: 14, right: 12, background: 'none', border: 'none', fontSize: 22, color: '#999', cursor: 'pointer', lineHeight: 1, zIndex: 2 }}>×</button>
+        )}
       <div style={{ padding: '18px 18px 14px', borderBottom: '1px solid #ebebeb', flexShrink: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a', letterSpacing: '0.04em', textTransform: 'uppercase' }}>CATS Program</div>
         <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>Cohort Community</div>
@@ -636,6 +650,7 @@ function Sidebar({ groups, activeId, onSelect, currentUser, chatClient, activeCh
         </button>
       </div>
     </div>
+    </React.Fragment>
   );
 }
 
@@ -747,7 +762,7 @@ function GettingStartedWiki() {
     </div>
   );
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '28px 32px', fontFamily: "'DM Sans', sans-serif", background: '#fff' }}>
+    <div className="cats-wiki" style={{ flex: 1, overflowY: 'auto', padding: '28px 32px', fontFamily: "'DM Sans', sans-serif", background: '#fff' }}>
       <div style={{ maxWidth: 560, margin: '0 auto' }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: '#1a1a1a', marginBottom: 6 }}>Welcome to the CATS Community</h1>
         <p style={{ fontSize: 14, color: '#777', marginBottom: 26, lineHeight: 1.6 }}>This is your space to connect with the cohort, ask questions, and learn together. Here is how everything works.</p>
@@ -898,7 +913,15 @@ function App() {
   const [unreadCounts, setUnreadCounts] = useState({});
   const [mentionCounts, setMentionCounts] = useState({});
   const [rosterMembers, setRosterMembers] = useState([]);
+  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth <= 768 : false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const clientRef = useRef(null);
+
+  useEffect(() => {
+    function onResize() { setIsMobile(window.innerWidth <= 768); }
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   useEffect(() => {
     const stored = getStoredProfile();
@@ -970,6 +993,7 @@ function App() {
 
   async function handleChannelSelect(id) {
     setActiveId(id);
+    setMobileNavOpen(false);
     setUnreadCounts(prev => ({ ...prev, [id]: 0 }));
     setMentionCounts(prev => ({ ...prev, [id]: 0 }));
     if (STATIC_CHANNELS.includes(id)) return;
@@ -1054,14 +1078,26 @@ function App() {
         .str-chat__date-separator-date{font-family:'DM Sans',sans-serif!important;font-size:11px!important;font-weight:600!important;color:#bbb!important;letter-spacing:0.04em!important;text-transform:uppercase!important;background:transparent!important;padding:0!important}
         .str-chat__jump-to-latest-message,.str-chat__scroll-to-bottom-button{position:absolute!important;bottom:16px!important;right:20px!important;z-index:50!important}
         .str-chat__scroll-to-bottom-button button,.str-chat__jump-to-latest-message button{background:#3b73d8!important;color:#fff!important;border-radius:20px!important;box-shadow:0 4px 14px rgba(59,115,216,0.35)!important;font-family:'DM Sans',sans-serif!important;border:none!important}
+        @media (max-width: 768px){
+          .str-chat__channel-header{padding-left:62px!important}
+          .cats-wiki{padding-top:64px!important}
+        }
       `}</style>
-      <Sidebar groups={CHANNEL_GROUPS} activeId={activeId} onSelect={handleChannelSelect} currentUser={currentUser} chatClient={chatClient} activeChannel={activeChannel} onEditProfile={() => setShowProfileForm(true)} unreadCounts={unreadCounts} mentionCounts={mentionCounts} />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <Sidebar groups={CHANNEL_GROUPS} activeId={activeId} onSelect={handleChannelSelect} currentUser={currentUser} chatClient={chatClient} activeChannel={activeChannel} onEditProfile={() => setShowProfileForm(true)} unreadCounts={unreadCounts} mentionCounts={mentionCounts} isMobile={isMobile} mobileNavOpen={mobileNavOpen} onCloseMobileNav={() => setMobileNavOpen(false)} />
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+        {isMobile && !mobileNavOpen && (
+          <button onClick={() => setMobileNavOpen(true)} title="Open menu"
+            style={{ position: 'absolute', top: 12, left: 12, zIndex: 70, background: '#fff', border: '1px solid #e8e8e8', borderRadius: 8, width: 38, height: 38, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, cursor: 'pointer', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+            <span style={{ width: 16, height: 2, background: '#444', borderRadius: 2 }} />
+            <span style={{ width: 16, height: 2, background: '#444', borderRadius: 2 }} />
+            <span style={{ width: 16, height: 2, background: '#444', borderRadius: 2 }} />
+          </button>
+        )}
         {STATIC_CHANNELS.includes(activeId) ? (
           <GettingStartedWiki />
         ) : activeChannel && (
           <Chat client={chatClient} theme="str-chat__theme-light">
-            <Channel channel={activeChannel}>
+            <Channel channel={activeChannel} EmptyStateIndicator={() => <ChannelEmptyState channelId={activeId} />}>
               <Window>
                 <div style={{ position: 'relative' }}>
                   <ChannelHeader />
@@ -1069,7 +1105,7 @@ function App() {
                     <ChannelSearchPanel channel={activeChannel} />
                   </div>
                 </div>
-                <MessageList Message={CustomMessage} EmptyStateIndicator={() => <ChannelEmptyState channelId={activeId} />} disableDateSeparator={false} returnAllReadData={false} />
+                <MessageList Message={CustomMessage} disableDateSeparator={false} returnAllReadData={false} />
                 <div style={{ position: 'relative' }}>
                   <TypingIndicator />
                   {(activeId !== ANNOUNCEMENTS_ID || canPostAnnouncements(currentUser?.id)) ? (
