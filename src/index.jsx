@@ -286,6 +286,29 @@ function ProfileForm({ initial = {}, onSave, title, subtitle, showIntro = false,
   );
 }
 
+function WelcomeCard({ name, onOpenGuide, onDismiss }) {
+  const firstName = (name || '').split(' ')[0];
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, fontFamily: "'DM Sans', sans-serif", padding: 16 }}>
+      <div style={{ background: '#fff', borderRadius: 16, padding: '32px 32px 28px', width: 460, maxWidth: '95vw', boxShadow: '0 20px 60px rgba(0,0,0,0.18)', textAlign: 'center' }}>
+        <div style={{ fontSize: 46, marginBottom: 12 }}>👋</div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: '#1a1a1a', marginBottom: 10 }}>
+          {firstName ? `Welcome, ${firstName}!` : 'Welcome!'}
+        </div>
+        <div style={{ fontSize: 14, color: '#555', lineHeight: 1.65, maxWidth: 380, margin: '0 auto 22px' }}>
+          This is the CATS cohort community, your space to connect, ask questions, and learn together. Before you dive in, take two minutes to read the Getting Started guide. It walks you through how everything works, how to reach Dr. Mayfield, and how to get help if you need it.
+        </div>
+        <button onClick={onOpenGuide} style={{ width: '100%', padding: '12px', fontSize: 14, fontWeight: 600, background: '#3b73d8', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", marginBottom: 10, boxShadow: '0 2px 8px rgba(59,115,216,0.25)' }}>
+          Open the Getting Started guide
+        </button>
+        <button onClick={onDismiss} style={{ width: '100%', padding: '11px', fontSize: 13.5, fontWeight: 500, background: 'none', color: '#666', border: 'none', borderRadius: 8, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}>
+          Got it, take me to the chat
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ProfileCard({ user, onClose }) {
   if (!user) return null;
   const name = user.name || user.id;
@@ -701,17 +724,32 @@ function Sidebar({ groups, activeId, onSelect, currentUser, chatClient, activeCh
 }
 
 const EMPTY_PROMPTS = {
-  'cats-announcements': { icon: '📣', text: 'Announcements from the instructor will appear here. Check back for important updates.' },
-  'cats-general': { icon: '👋', text: 'Welcome to the cohort community! Introduce yourself and say hello.' },
-  'cats-weekly-wins': { icon: '🎉', text: 'Be the first to share a win this week, big or small.' },
-  'cats-readings': { icon: '📚', text: 'Share articles, resources, and readings with the cohort here.' },
+  'cats-announcements': { icon: '📣', title: 'Announcements', body: 'Important updates from the instructor will appear here. Check back often for schedule changes and key information.' },
+  'cats-general': {
+    icon: '👋',
+    title: 'Welcome to the CATS Community!',
+    body: 'This is the heart of the cohort, where you connect, ask questions, and learn together. Before you post, take two minutes to read the Getting Started guide. It shows you how everything works, how to reach Dr. Mayfield, and how to get help.',
+    ctaLabel: 'Read the Getting Started guide',
+    ctaChannel: GETTING_STARTED_ID,
+    afterCta: 'Then come back here and introduce yourself. We are glad you are here.',
+  },
+  'cats-weekly-wins': { icon: '🎉', title: 'Weekly Wins', body: 'Share a win from your week, big or small. Be the first to get it started.' },
+  'cats-readings': { icon: '📚', title: 'Readings & Resources', body: 'Share articles, resources, and readings with the cohort here.' },
 };
-function ChannelEmptyState({ channelId }) {
-  const prompt = EMPTY_PROMPTS[channelId] || { icon: '💬', text: 'No messages yet. Start the conversation for this module.' };
+function ChannelEmptyState({ channelId, onJump }) {
+  const prompt = EMPTY_PROMPTS[channelId] || { icon: '💬', title: '', body: 'No messages yet. Start the conversation for this module.' };
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 32px', textAlign: 'center', fontFamily: "'DM Sans', sans-serif", color: '#999' }}>
-      <div style={{ fontSize: 40, marginBottom: 14 }}>{prompt.icon}</div>
-      <div style={{ fontSize: 14, color: '#666', maxWidth: 320, lineHeight: 1.5 }}>{prompt.text}</div>
+      <div style={{ fontSize: 44, marginBottom: 14 }}>{prompt.icon}</div>
+      {prompt.title && <div style={{ fontSize: 17, fontWeight: 600, color: '#1a1a1a', marginBottom: 8 }}>{prompt.title}</div>}
+      <div style={{ fontSize: 14, color: '#666', maxWidth: 360, lineHeight: 1.6 }}>{prompt.body}</div>
+      {prompt.ctaLabel && onJump && (
+        <button onClick={() => onJump(prompt.ctaChannel)}
+          style={{ marginTop: 18, background: '#3b73d8', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 18px', fontSize: 13.5, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", boxShadow: '0 2px 8px rgba(59,115,216,0.25)' }}>
+          {prompt.ctaLabel}
+        </button>
+      )}
+      {prompt.afterCta && <div style={{ fontSize: 13, color: '#999', maxWidth: 340, lineHeight: 1.6, marginTop: 14 }}>{prompt.afterCta}</div>}
     </div>
   );
 }
@@ -959,6 +997,7 @@ function App() {
   const [error, setError] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [showProfileForm, setShowProfileForm] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(false);
   const [isSignup, setIsSignup] = useState(false);
   const [unreadCounts, setUnreadCounts] = useState({});
   const [mentionCounts, setMentionCounts] = useState({});
@@ -1082,7 +1121,10 @@ function App() {
     // Identity is derived from the email, so the same email is the same account anywhere.
     const id = await emailToUserId(profileData.email);
     const instructor = isInstructorEmail(profileData.email);
-    const profile = { ...profileData, id, instructor };
+    const prior = getStoredProfile();
+    // Preserve whether this person has already seen the welcome card.
+    const welcomed = !!(prior && prior.welcomed);
+    const profile = { ...profileData, id, instructor, welcomed };
     storeProfile(profile);
     setCurrentUser(profile);
     setShowProfileForm(false);
@@ -1095,6 +1137,21 @@ function App() {
         await clientRef.current.upsertUser({ id: profile.id, name: profile.name, color: profile.color, bio: profile.bio || '', link: profile.link || '', instructor });
       }
     }
+  }
+
+  // Show the one-time welcome card once the person is connected, if they have not seen it.
+  useEffect(() => {
+    if (chatClient && currentUser && !currentUser.welcomed && !showProfileForm) {
+      setShowWelcome(true);
+    }
+  }, [chatClient, currentUser, showProfileForm]);
+
+  function dismissWelcome(openGuide) {
+    const updated = { ...(currentUser || {}), welcomed: true };
+    storeProfile(updated);
+    setCurrentUser(updated);
+    setShowWelcome(false);
+    if (openGuide) handleChannelSelect(GETTING_STARTED_ID);
   }
 
   if (error) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: '#c00', padding: '2rem', textAlign: 'center' }}>{error}</div>;
@@ -1118,6 +1175,7 @@ function App() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', fontFamily: "'DM Sans', sans-serif", background: '#fff', border: '1px solid #e8e8e8', borderRadius: 12, overflow: 'hidden' }}>
+      {showWelcome && <WelcomeCard name={currentUser?.name} onOpenGuide={() => dismissWelcome(true)} onDismiss={() => dismissWelcome(false)} />}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&display=swap');
         @keyframes mhms-pulse{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}
@@ -1161,7 +1219,7 @@ function App() {
           <GettingStartedWiki />
         ) : activeChannel && (
           <Chat client={chatClient} theme="str-chat__theme-light">
-            <Channel channel={activeChannel} EmptyStateIndicator={() => <ChannelEmptyState channelId={activeId} />}>
+            <Channel channel={activeChannel} EmptyStateIndicator={() => <ChannelEmptyState channelId={activeId} onJump={handleChannelSelect} />}>
               <Window>
                 <div style={{ position: 'relative' }}>
                   <ChannelHeader />
