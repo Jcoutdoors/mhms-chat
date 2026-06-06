@@ -2,7 +2,7 @@
 
 This is the operating manual and current state for the custom community chat built for
 the MHMS / CATS cohort program. Drop this whole folder into the project as knowledge so
-any new conversation starts with full context. **Current version: v42 (live in production).**
+any new conversation starts with full context. **Current version: v46 (live in production).**
 
 ---
 
@@ -21,8 +21,8 @@ It is LIVE with real students. Treat every change as a production change.
 
 **Chat bundle (the app itself)**
 - React app built with webpack into a single self-contained bundle plus a few lazy chunks.
-- Hosted on GitHub Pages at `https://jcoutdoors.github.io/mhms-chat/` (repo `mhms-chat`, personal GitHub account `jcoutdoors`).
-- Embedded in Squarespace via an iframe at `https://www.mentalhealthmadesimple.life/catscourse#community`.
+- Hosted on GitHub Pages (repo `mhms-chat`, personal GitHub account `jcoutdoors`), served via the custom domain `https://chat.mentalhealthmadesimple.life` (GitHub Pages custom domain; DNS is a CNAME at GoDaddy: name `chat` -> `jcoutdoors.github.io`). The old `https://jcoutdoors.github.io/mhms-chat/` address now redirects to the custom domain.
+- The iframe embed in Squarespace points at `https://chat.mentalhealthmadesimple.life`.
 - Why bundled this way: Squarespace blocks external CDN scripts and ES modules, so React, stream-chat, and stream-chat-react are all pre-bundled into one file and loaded from GitHub Pages inside an iframe.
 
 **Stream Chat app**
@@ -224,6 +224,9 @@ If reactions, uploads, or user search ever break, re-check these.
 - **v40** — visual restyle (part 1 of 2). New design system: CSS-variable palette (indigo primary scale, warm-tinted neutrals, layered surfaces canvas/sidebar/surface), Fraunces serif for the brand mark against DM Sans body, the app now a floating rounded panel with soft shadow on a tinted canvas, gradient logo mark, active-channel "raised card" treatment, muted/harmonious 12-color avatar palette (replaced the loud primaries), restyled composer (rounded, focus ring), reaction pills, header (blur), date separators, and a weighted hint line under the composer: "Type @ to mention someone in the group · @mark reaches Dr. Mayfield · @support reaches tech support". NOTE: message stream still uses left/right bubbles; converting to the flat grouped layout is part 2 (message grouping). Mobile carries the same tokens. Mockup reference: cats-chat-restyle-proposal.html.
 - **v41** — fix: the hover toolbar and reaction picker were anchored to the far edge of the message row, which floated them far from the bubble on a full-width (non-embed) screen. Now anchored next to the bubble (56px in on the content side) for both own and others' messages.
 - **v42** — restored a visible send button. Stream's native send button (`.str-chat__send-button`) was not showing in our custom composer layout (v2 theme positions it inside its own wrapper, which our restyle hid). Added our own gradient airplane button to the composer; it dispatches an Enter keydown on the textarea (the same path Enter-to-send already uses, the reliable trigger) and only fires on non-empty text. Native button hidden via CSS.
+- **v43** — fixed mobile sidebar scrolling. The sidebar had a nested scroll region (the members list was `flex:1` + `overflowY:auto` inside the already-scrollable sidebar), so on mobile the inner list captured the gesture and the channel list above could not be reached. Made the whole sidebar one scroll container: members list and profile footer now flow normally (no competing scroll, no `marginTop:auto` pin), with `WebkitOverflowScrolling:touch` for momentum.
+- **v44** — custom domain migration. Chat now served from `https://chat.mentalhealthmadesimple.life` (GoDaddy CNAME -> jcoutdoors.github.io, GitHub Pages custom domain, Enforce HTTPS on). Updated the notification icon URL off the old address. IMPORTANT LESSONS from the migration: (1) the app's `emailToUserId` uses `crypto.subtle`, which only exists in a secure (HTTPS) context, so the new domain could not log anyone in until Enforce HTTPS was on. (2) The token worker had a single hardcoded `Access-Control-Allow-Origin`; it now keeps an allow-list (subdomain, github.io, both squarespace hosts) and echoes the matching origin. (3) Setting a GitHub Pages custom domain immediately redirects the old address to the new one, so it must only be set AFTER DNS is verified and HTTPS is ready, or the live embed breaks. The notification worker did NOT need a CORS change (it receives Stream webhooks, not browser calls).
+- **v45/v46** — persistent unread + mention badges (the real fix). v45 first made the client watch ALL channels on login (so live `message.new` fires everywhere, not just opened channels). v46 then switched from in-memory counting to Stream's server-side read state: on login, badges are seeded from `channel.countUnread()` and `channel.countUnreadMentions()`, so users see everything missed since their LAST session (and across devices), not just what arrives while connected. Opening a channel calls `channel.markRead()` so the cleared state persists server-side; a message arriving in the currently-viewed channel marks read instead of badging (uses an `activeIdRef` so the event handler sees the current channel). REQUIRES `read_events` enabled on the `messaging` channel type in the Stream dashboard, or counts return 0 and it silently falls back to live-only. Real-time browser popup/chime remain mention-only and live-only by nature (a closed browser can't be notified; that would need push infrastructure). Deployed as one build (v45 skipped as a standalone).
 
 ## Roadmap (not yet built)
 
