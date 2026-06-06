@@ -521,7 +521,7 @@ function CustomMessage() {
       </div>
 
       {hovered && !editing && (
-        <div style={{ position: 'absolute', top: -14, [mine ? 'left' : 'right']: 16, background: '#fff', border: '1px solid #e8e8e8', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.08)', display: 'flex', gap: 2, padding: '3px 6px', zIndex: 10, alignItems: 'center' }}>
+        <div style={{ position: 'absolute', top: -14, [mine ? 'right' : 'left']: 56, background: '#fff', border: '1px solid #e7e9f0', borderRadius: 9, boxShadow: '0 4px 16px rgba(24,27,38,0.07),0 1px 4px rgba(24,27,38,0.05)', display: 'flex', gap: 2, padding: '3px 6px', zIndex: 10, alignItems: 'center' }}>
           <button onClick={() => setShowReactionPicker(p => !p)} title="React" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '3px 5px', borderRadius: 4, fontSize: 14, display: 'flex', alignItems: 'center' }}>
             😊
           </button>
@@ -542,7 +542,7 @@ function CustomMessage() {
             </span>
           )}
           {showReactionPicker && (
-            <div style={{ position: 'absolute', top: 34, [mine ? 'left' : 'right']: 0, background: '#fff', border: '1px solid #e8e8e8', borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', display: 'flex', gap: 4, padding: '6px 8px', zIndex: 20 }}>
+            <div style={{ position: 'absolute', top: 34, [mine ? 'right' : 'left']: 0, background: '#fff', border: '1px solid #e7e9f0', borderRadius: 10, boxShadow: '0 4px 16px rgba(24,27,38,0.10)', display: 'flex', gap: 4, padding: '6px 8px', zIndex: 20 }}>
               {REACTION_ORDER.map(t => (
                 <button key={t} onClick={() => { handleReaction(t); setShowReactionPicker(false); }} title={t} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, padding: '2px 4px', borderRadius: 6, lineHeight: 1 }}
                   onMouseEnter={e => e.currentTarget.style.background = '#f4f4f4'}
@@ -1209,7 +1209,7 @@ function App() {
         .str-chat__message-textarea-react-host textarea,.str-chat__message-textarea{font-family:'DM Sans',sans-serif!important;font-size:14px!important;border-radius:14px!important;border:1px solid var(--line)!important;background:var(--raise)!important;padding:12px 14px!important;line-height:1.6!important;color:var(--ink-700)!important}
         .str-chat__message-textarea-react-host textarea:focus,.str-chat__message-textarea:focus{border-color:var(--primary-500)!important;background:var(--surface)!important;outline:none!important;box-shadow:0 0 0 4px rgba(58,85,217,0.08)!important}
         .str-chat__list{background:var(--surface)!important;padding:8px 0!important}
-        .str-chat__send-button{background:linear-gradient(135deg,var(--primary-600),var(--primary-700))!important;border-radius:10px!important;color:#fff!important;box-shadow:0 4px 12px rgba(58,85,217,0.32)!important}
+        .str-chat__send-button{display:none!important}
         .str-chat__avatar{display:none!important}
         .str-chat__message-sender-name{display:none!important}
         .str-chat__date-separator{display:flex!important;align-items:center!important;padding:16px 18px 12px!important;gap:14px!important}
@@ -1248,7 +1248,7 @@ function App() {
                 <div style={{ position: 'relative' }}>
                   <TypingIndicator />
                   {(activeId !== ANNOUNCEMENTS_ID || canPostAnnouncements(currentUser)) ? (
-                  <div style={{ display: 'flex', alignItems: 'flex-end', borderTop: '1px solid #ebebeb', background: '#fff', padding: '8px 12px', gap: 6, position: 'relative' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-end', borderTop: '1px solid #eef0f5', background: '#fff', padding: '10px 16px', gap: 8, position: 'relative' }}>
                     <MentionAutocomplete members={rosterMembers} canMentionEveryone={canPostAnnouncements(currentUser)} />
                     <EmojiButton onEmojiSelect={(emoji) => {
                       const textarea = document.querySelector('.str-chat__message-textarea-react-host textarea, .str-chat__message-textarea');
@@ -1267,6 +1267,18 @@ function App() {
                     <div style={{ flex: 1 }}>
                       <MessageInput grow={true} minRows={5} maxRows={12} />
                     </div>
+                    <button title="Send" onClick={() => {
+                      const ta = document.querySelector('.str-chat__message-textarea-react-host textarea, .str-chat__message-textarea');
+                      if (ta && ta.value.trim()) {
+                        ta.focus();
+                        ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                      }
+                    }}
+                      style={{ width: 40, height: 40, flexShrink: 0, borderRadius: 11, border: 'none', cursor: 'pointer', background: 'linear-gradient(135deg,#3a55d9,#2f44b8)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(58,85,217,0.32)', alignSelf: 'flex-end', marginBottom: 1, transition: 'transform 0.12s ease' }}
+                      onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-1px)'}
+                      onMouseLeave={e => e.currentTarget.style.transform = 'none'}>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13"></path><path d="M22 2 15 22l-4-9-9-4 20-7z"></path></svg>
+                    </button>
                   </div>
                   ) : (
                     <div style={{ borderTop: '1px solid #ebebeb', background: '#fafafa', padding: '14px 16px', textAlign: 'center', fontSize: 12.5, color: '#999', fontFamily: "'DM Sans', sans-serif" }}>
