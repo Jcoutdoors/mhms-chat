@@ -41,12 +41,34 @@ setTimeout(() => loadEmojiMart().catch(() => {}), 3000);
 const TOKEN_URL = 'https://mhms-chat-token.jonathan-5ad.workers.dev';
 const API_KEY = '9bdsdh9s956e';
 
-// User IDs allowed to post in the announcements channel.
-// Add the real IDs for Mark and Jonathan once known; matched by prefix too.
-const ANNOUNCER_PREFIXES = ['cats-mark', 'cats-mayfield', 'cats-jonathan', 'jonathan'];
-function canPostAnnouncements(userId) {
-  if (!userId) return false;
-  return ANNOUNCER_PREFIXES.some(p => userId.toLowerCase().startsWith(p));
+// Instructor accounts are gated by the email they sign in with.
+// Anyone signing in with one of these emails can post in Announcements and use @everyone.
+const INSTRUCTOR_EMAILS = ['jonathan@nexgenrva.com', 'dr.mark.mayfield@gmail.com'];
+function normalizeEmail(email) {
+  return (email || '').trim().toLowerCase();
+}
+function isInstructorEmail(email) {
+  return INSTRUCTOR_EMAILS.includes(normalizeEmail(email));
+}
+
+// Turn an email into a stable, deterministic Stream user ID. The same email always
+// yields the same ID, so a person reconnects as the same account on any device.
+// Stream user IDs must match [a-z0-9_-]; we hash to hex and prefix with cats-.
+async function emailToUserId(email) {
+  const norm = normalizeEmail(email);
+  const bytes = new TextEncoder().encode(norm);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  const hex = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+  return 'cats-' + hex.slice(0, 24);
+}
+
+// Instructor status travels on the user object as an `instructor` flag, set at setup
+// from the email allowlist. canPostAnnouncements reads that flag. It accepts either a
+// full user object or a Stream message user (which also carries the flag once connected).
+function canPostAnnouncements(user) {
+  if (!user) return false;
+  if (typeof user === 'object') return !!user.instructor;
+  return false;
 }
 const ANNOUNCEMENTS_ID = 'cats-announcements';
 const GETTING_STARTED_ID = 'cats-getting-started';
@@ -185,6 +207,7 @@ const btnPrimary = {
 function ProfileForm({ initial = {}, onSave, title, subtitle }) {
   const [firstName, setFirstName] = useState(initial.firstName || '');
   const [lastName, setLastName] = useState(initial.lastName || '');
+  const [email, setEmail] = useState(initial.email || '');
   const [bio, setBio] = useState(initial.bio || '');
   const [link, setLink] = useState(initial.link || '');
   const [color, setColor] = useState(initial.color || AVATAR_COLORS[0].value);
@@ -194,7 +217,10 @@ function ProfileForm({ initial = {}, onSave, title, subtitle }) {
   function handleSave() {
     if (!firstName.trim()) { setError('First name is required.'); return; }
     if (!lastName.trim()) { setError('Last name is required.'); return; }
-    onSave({ firstName: firstName.trim(), lastName: lastName.trim(), bio: bio.trim(), link: link.trim(), color, name: fullName });
+    const e = email.trim();
+    if (!e) { setError('Email is required.'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) { setError('Please enter a valid email address.'); return; }
+    onSave({ firstName: firstName.trim(), lastName: lastName.trim(), email: e, bio: bio.trim(), link: link.trim(), color, name: fullName });
   }
 
   return (
@@ -215,6 +241,13 @@ function ProfileForm({ initial = {}, onSave, title, subtitle }) {
           <div>
             <label style={labelStyle}>Last Name</label>
             <input style={inputStyle} value={lastName} onChange={e => setLastName(e.target.value)} placeholder="Johnson" />
+          </div>
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <label style={labelStyle}>Email</label>
+          <input style={inputStyle} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" />
+          <div style={{ fontSize: 11.5, color: '#999', marginTop: 5, lineHeight: 1.45 }}>
+            Used to keep your account synced across your devices. Use the same email on your phone and laptop to stay signed in as you.
           </div>
         </div>
         <div style={{ marginBottom: 12 }}>
@@ -799,6 +832,10 @@ function GettingStartedWiki() {
           Looking for something said earlier? Click the search icon at the top right of any channel and type a word or phrase to find past messages in that channel.
         </Section>
 
+        <Section icon="🔑" title="Your account">
+          Your email is your account. Sign in with the same email on your phone, laptop, or anywhere else, and you are the same you, with your same name and history. No second account to set up, no juggling logins. One email, everywhere.
+        </Section>
+
         <Section icon="📎" title="Sharing files">
           Use the attachment button in the message box to share images, PDFs, and other files with the cohort.
         </Section>
@@ -926,6 +963,12 @@ function App() {
   useEffect(() => {
     const stored = getStoredProfile();
     if (!stored) { setIsSignup(true); setShowProfileForm(true); }
+    else if (!stored.email) {
+      // Existing pre-email profile: ask them to add an email once. Treated as signup so
+      // identity is rederived from the email and connects on the stable ID. Their name
+      // and color are pre-filled, so it is a quick confirm, not a rebuild.
+      setIsSignup(true); setShowProfileForm(true);
+    }
     else { setCurrentUser(stored); connectChat(stored); }
   }, []);
 
@@ -936,7 +979,7 @@ function App() {
       if (!data.token) throw new Error('Token not returned.');
       const client = StreamChat.getInstance(API_KEY);
       clientRef.current = client;
-      await client.connectUser({ id: profile.id, name: profile.name, color: profile.color, bio: profile.bio || '', link: profile.link || '' }, data.token);
+      await client.connectUser({ id: profile.id, name: profile.name, color: profile.color, bio: profile.bio || '', link: profile.link || '', instructor: !!profile.instructor }, data.token);
 
       const initialId = getInitialChannelId();
       const initialChDef = ALL_CHANNELS.find(c => c.id === initialId) || ALL_CHANNELS.find(c => c.id === 'cats-general');
@@ -962,7 +1005,7 @@ function App() {
 
         // Did this message mention me, or @everyone from an instructor?
         const mentionedMe = (myFirst && lower.includes('@' + myFirst)) || (myName && lower.includes('@' + myName));
-        const everyoneByInstructor = lower.includes('@everyone') && canPostAnnouncements(senderId);
+        const everyoneByInstructor = lower.includes('@everyone') && canPostAnnouncements(msg.user);
         const isMention = mentionedMe || everyoneByInstructor;
 
         setUnreadCounts(prev => ({ ...prev, [chId]: (prev[chId] || 0) + 1 }));
@@ -1023,15 +1066,21 @@ function App() {
   }, [chatClient]);
 
   async function handleProfileSave(profileData) {
-    const stored = getStoredProfile();
-    const id = stored?.id || ('cats-' + profileData.firstName.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.random().toString(36).slice(2, 7));
-    const profile = { ...profileData, id };
+    // Identity is derived from the email, so the same email is the same account anywhere.
+    const id = await emailToUserId(profileData.email);
+    const instructor = isInstructorEmail(profileData.email);
+    const profile = { ...profileData, id, instructor };
     storeProfile(profile);
     setCurrentUser(profile);
     setShowProfileForm(false);
     if (isSignup) { setIsSignup(false); await connectChat(profile); }
     else if (clientRef.current) {
-      await clientRef.current.upsertUser({ id: profile.id, name: profile.name, color: profile.color, bio: profile.bio || '', link: profile.link || '' });
+      // If the email changed the derived ID, reconnect as the new identity.
+      if (clientRef.current.user && clientRef.current.user.id !== id) {
+        await connectChat(profile);
+      } else {
+        await clientRef.current.upsertUser({ id: profile.id, name: profile.name, color: profile.color, bio: profile.bio || '', link: profile.link || '', instructor });
+      }
     }
   }
 
@@ -1109,9 +1158,9 @@ function App() {
                 <MessageList Message={CustomMessage} disableDateSeparator={false} returnAllReadData={false} />
                 <div style={{ position: 'relative' }}>
                   <TypingIndicator />
-                  {(activeId !== ANNOUNCEMENTS_ID || canPostAnnouncements(currentUser?.id)) ? (
+                  {(activeId !== ANNOUNCEMENTS_ID || canPostAnnouncements(currentUser)) ? (
                   <div style={{ display: 'flex', alignItems: 'flex-end', borderTop: '1px solid #ebebeb', background: '#fff', padding: '8px 12px', gap: 6, position: 'relative' }}>
-                    <MentionAutocomplete members={rosterMembers} canMentionEveryone={canPostAnnouncements(currentUser?.id)} />
+                    <MentionAutocomplete members={rosterMembers} canMentionEveryone={canPostAnnouncements(currentUser)} />
                     <EmojiButton onEmojiSelect={(emoji) => {
                       const textarea = document.querySelector('.str-chat__message-textarea-react-host textarea, .str-chat__message-textarea');
                       if (textarea) {
@@ -1127,7 +1176,7 @@ function App() {
                       }
                     }} />
                     <div style={{ flex: 1 }}>
-                      <MessageInput />
+                      <MessageInput minRows={5} />
                     </div>
                   </div>
                   ) : (
@@ -1137,7 +1186,7 @@ function App() {
                   )}
                 </div>
               </Window>
-              <Thread />
+              <Thread additionalMessageInputProps={{ minRows: 5 }} />
             </Channel>
           </Chat>
         )}
