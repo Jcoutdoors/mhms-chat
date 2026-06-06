@@ -156,18 +156,18 @@ function getInitialChannelId() {
 }
 
 const AVATAR_COLORS = [
-  { value: '#3b73d8', label: 'Blue' },
-  { value: '#e05c2a', label: 'Orange' },
-  { value: '#2a9d8f', label: 'Teal' },
-  { value: '#8b5cf6', label: 'Purple' },
-  { value: '#d4446b', label: 'Rose' },
-  { value: '#0891b2', label: 'Cyan' },
-  { value: '#65a30d', label: 'Green' },
-  { value: '#b45309', label: 'Amber' },
-  { value: '#dc2626', label: 'Red' },
-  { value: '#7c3aed', label: 'Violet' },
-  { value: '#0f766e', label: 'Emerald' },
-  { value: '#be185d', label: 'Pink' },
+  { value: '#5a6bd4', label: 'Indigo' },
+  { value: '#3a9d96', label: 'Teal' },
+  { value: '#cf7a5c', label: 'Clay' },
+  { value: '#6f9d6a', label: 'Sage' },
+  { value: '#9a5fa6', label: 'Plum' },
+  { value: '#5f7088', label: 'Slate' },
+  { value: '#cc6585', label: 'Rose' },
+  { value: '#c79234', label: 'Amber' },
+  { value: '#4f8fc0', label: 'Sky' },
+  { value: '#7d7fd4', label: 'Periwinkle' },
+  { value: '#2f9d7b', label: 'Emerald' },
+  { value: '#b56b9e', label: 'Mauve' },
 ];
 
 function getInitials(name) {
@@ -199,9 +199,10 @@ const inputStyle = {
   background: '#fafafa', outline: 'none', boxSizing: 'border-box',
 };
 const btnPrimary = {
-  width: '100%', padding: '11px', fontSize: 14, fontWeight: 600,
-  background: '#3b73d8', color: '#fff', border: 'none',
-  borderRadius: 8, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
+  width: '100%', padding: '12px', fontSize: 14, fontWeight: 600,
+  background: 'linear-gradient(135deg,#3a55d9,#2f44b8)', color: '#fff', border: 'none',
+  borderRadius: 10, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
+  boxShadow: '0 4px 12px rgba(58,85,217,0.28)',
 };
 
 function ProfileForm({ initial = {}, onSave, title, subtitle, showIntro = false, isReturning = false }) {
@@ -298,7 +299,7 @@ function WelcomeCard({ name, onOpenGuide, onDismiss }) {
         <div style={{ fontSize: 14, color: '#555', lineHeight: 1.65, maxWidth: 380, margin: '0 auto 22px' }}>
           This is the CATS cohort community, your space to connect, ask questions, and learn together. Before you dive in, take two minutes to read the Getting Started guide. It walks you through how everything works, how to reach Dr. Mayfield, and how to get help if you need it.
         </div>
-        <button onClick={onOpenGuide} style={{ width: '100%', padding: '12px', fontSize: 14, fontWeight: 600, background: '#3b73d8', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", marginBottom: 10, boxShadow: '0 2px 8px rgba(59,115,216,0.25)' }}>
+        <button onClick={onOpenGuide} style={{ width: '100%', padding: '12px', fontSize: 14, fontWeight: 600, background: 'linear-gradient(135deg,#3a55d9,#2f44b8)', color: '#fff', border: 'none', borderRadius: 10, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", marginBottom: 10, boxShadow: '0 4px 12px rgba(58,85,217,0.28)' }}>
           Open the Getting Started guide
         </button>
         <button onClick={onDismiss} style={{ width: '100%', padding: '11px', fontSize: 13.5, fontWeight: 500, background: 'none', color: '#666', border: 'none', borderRadius: 8, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}>
@@ -323,7 +324,7 @@ function ProfileCard({ user, onClose }) {
         </div>
         {user.bio && <div style={{ fontSize: 13, color: '#555', lineHeight: 1.6, marginBottom: 12 }}>{user.bio}</div>}
         {user.link && (
-          <a href={user.link.startsWith('http') ? user.link : `https://${user.link}`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: '#3b73d8', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <a href={user.link.startsWith('http') ? user.link : `https://${user.link}`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: '#3a55d9', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
             🔗 {user.link.replace(/^https?:\/\//, '')}
           </a>
         )}
@@ -377,7 +378,7 @@ function EmojiButton({ onEmojiSelect }) {
   return (
     <div style={{ position: 'relative', display: 'inline-flex', alignSelf: 'flex-end', marginBottom: 2 }}>
       <button ref={btnRef} onClick={() => { setError(false); setShowPicker(p => !p); }} title="Add emoji"
-        style={{ background: showPicker ? '#e8f0fe' : 'none', border: 'none', cursor: 'pointer', fontSize: 18, padding: '6px 8px', borderRadius: 6, color: showPicker ? '#3b73d8' : '#888', lineHeight: 1, display: 'flex', alignItems: 'center', transition: 'all 0.15s' }}>
+        style={{ background: showPicker ? '#f1f4fe' : 'none', border: 'none', cursor: 'pointer', fontSize: 18, padding: '6px 8px', borderRadius: 8, color: showPicker ? '#3a55d9' : '#969cac', lineHeight: 1, display: 'flex', alignItems: 'center', transition: 'all 0.15s' }}>
         😊
       </button>
       {showPicker && (
@@ -478,12 +479,12 @@ function CustomMessage() {
               style={{ ...inputStyle, height: 60, resize: 'none', background: '#fff' }}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(); } if (e.key === 'Escape') setEditing(false); }} />
             <div style={{ display: 'flex', gap: 6 }}>
-              <button onClick={saveEdit} style={{ fontSize: 12, fontWeight: 600, color: '#fff', background: '#3b73d8', border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}>Save</button>
+              <button onClick={saveEdit} style={{ fontSize: 12, fontWeight: 600, color: '#fff', background: '#3a55d9', border: 'none', borderRadius: 7, padding: '5px 12px', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}>Save</button>
               <button onClick={() => { setEditing(false); setEditText(message.text); }} style={{ fontSize: 12, color: '#666', background: 'none', border: 'none', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}>Cancel</button>
             </div>
           </div>
         ) : (
-          <div style={{ background: mine ? '#e8f0fe' : '#f4f4f4', borderRadius: mine ? '12px 2px 12px 12px' : '2px 12px 12px 12px', padding: '9px 13px', fontSize: 14, color: '#1a1a1a', lineHeight: 1.55, wordBreak: 'break-word', fontFamily: "'DM Sans', sans-serif" }}>
+          <div style={{ background: mine ? '#eef1fd' : '#f4f5f8', borderRadius: mine ? '14px 4px 14px 14px' : '4px 14px 14px 14px', padding: '10px 14px', fontSize: 14, color: '#383d4b', lineHeight: 1.6, wordBreak: 'break-word', fontFamily: "'DM Sans', sans-serif" }}>
             {renderTextWithMentions(message.text)}
             {message.message_text_updated && <span style={{ fontSize: 10, color: '#aaa', marginLeft: 6 }}>(edited)</span>}
           </div>
@@ -495,9 +496,9 @@ function CustomMessage() {
             {REACTION_ORDER.filter(t => reactionCounts[t] > 0).map(t => {
               const reacted = ownReactions.includes(t);
               return (
-                <button key={t} onClick={() => handleReaction(t)} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 12, padding: '2px 7px', borderRadius: 12, border: reacted ? '1px solid #3b73d8' : '1px solid #e5e5e5', background: reacted ? '#e8f0fe' : '#fff', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}>
+                <button key={t} onClick={() => handleReaction(t)} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, padding: '3px 9px', borderRadius: 13, border: reacted ? '1px solid #5872ea' : '1px solid #e7e9f0', background: reacted ? '#f1f4fe' : '#fbfcfe', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", fontWeight: 600, color: reacted ? '#2f44b8' : '#686e7e', transition: 'all 0.14s ease' }}>
                   <span>{REACTION_EMOJI[t]}</span>
-                  <span style={{ color: reacted ? '#3b73d8' : '#888', fontWeight: 600 }}>{reactionCounts[t]}</span>
+                  <span style={{ color: reacted ? '#2f44b8' : '#969cac', fontWeight: 700 }}>{reactionCounts[t]}</span>
                 </button>
               );
             })}
@@ -512,7 +513,7 @@ function CustomMessage() {
             <span style={{ fontSize: 10, color: '#b45309', fontWeight: 600, background: '#fef3c7', padding: '1px 6px', borderRadius: 4 }}>📌 Pinned</span>
           )}
           {replyCount > 0 && (
-            <button onClick={openThread} style={{ fontSize: 11, color: '#3b73d8', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: "'DM Sans', sans-serif", fontWeight: 500 }}>
+            <button onClick={openThread} style={{ fontSize: 11, color: '#3a55d9', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: "'DM Sans', sans-serif", fontWeight: 500 }}>
               {replyCount} {replyCount === 1 ? 'reply' : 'replies'}
             </button>
           )}
@@ -632,8 +633,8 @@ function MembersList({ chatClient, activeChannel, currentUserId }) {
   });
 
   return (
-    <div style={{ padding: '10px 10px 6px', borderTop: '1px solid #ebebeb', flex: 1, overflowY: 'auto', minHeight: 0 }}>
-      <div style={{ fontSize: 10, fontWeight: 600, color: '#bbb', letterSpacing: '0.08em', textTransform: 'uppercase', padding: '0 8px', marginBottom: 6 }}>
+    <div style={{ padding: '10px 10px 6px', borderTop: '1px solid #eef0f5', flex: 1, overflowY: 'auto', minHeight: 0 }}>
+      <div style={{ fontSize: 10.5, fontWeight: 700, color: '#969cac', letterSpacing: '0.09em', textTransform: 'uppercase', padding: '0 8px', marginBottom: 6 }}>
         Members {onlineCount > 0 && <span style={{ color: '#22c55e' }}>· {onlineCount} online</span>}
       </div>
       {sorted.map(user => {
@@ -662,7 +663,7 @@ function Sidebar({ groups, activeId, onSelect, currentUser, chatClient, activeCh
   const name = currentUser?.name || '';
   const color = currentUser?.color || '#3b73d8';
 
-  const baseStyle = { width: 240, minWidth: 240, background: '#f9f9f9', borderRight: '1px solid #ebebeb', display: 'flex', flexDirection: 'column', fontFamily: "'DM Sans', sans-serif", overflowY: 'auto' };
+  const baseStyle = { width: 264, minWidth: 264, background: 'linear-gradient(180deg,#f8f9fc 0%, #f4f6fa 100%)', borderRight: '1px solid #eef0f5', display: 'flex', flexDirection: 'column', fontFamily: "'DM Sans', sans-serif", overflowY: 'auto' };
   const mobileStyle = isMobile ? {
     position: 'fixed', top: 0, left: 0, height: '100vh', zIndex: 1100,
     transform: mobileNavOpen ? 'translateX(0)' : 'translateX(-100%)',
@@ -678,27 +679,32 @@ function Sidebar({ groups, activeId, onSelect, currentUser, chatClient, activeCh
         {isMobile && (
           <button onClick={onCloseMobileNav} style={{ position: 'absolute', top: 14, right: 12, background: 'none', border: 'none', fontSize: 22, color: '#999', cursor: 'pointer', lineHeight: 1, zIndex: 2 }}>×</button>
         )}
-      <div style={{ padding: '18px 18px 14px', borderBottom: '1px solid #ebebeb', flexShrink: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a', letterSpacing: '0.04em', textTransform: 'uppercase' }}>CATS Program</div>
-        <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>Cohort Community</div>
+      <div style={{ padding: '20px 20px 16px', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 30, height: 30, borderRadius: 9, background: 'linear-gradient(135deg,#3a55d9,#2f44b8)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 14, boxShadow: '0 4px 12px rgba(58,85,217,0.35)', fontFamily: "'Fraunces', serif", flexShrink: 0 }}>C</div>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#181b26', letterSpacing: '0.01em' }}>CATS Program</div>
+            <div style={{ fontSize: 11.5, color: '#969cac', marginTop: 1 }}>Cohort Community</div>
+          </div>
+        </div>
       </div>
 
       {groups.map(group => (
         <div key={group.label} style={{ padding: '12px 10px 4px', flexShrink: 0 }}>
-          <div style={{ fontSize: 10, fontWeight: 600, color: '#bbb', letterSpacing: '0.08em', textTransform: 'uppercase', padding: '0 8px', marginBottom: 4 }}>{group.label}</div>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: '#969cac', letterSpacing: '0.09em', textTransform: 'uppercase', padding: '8px 10px 6px' }}>{group.label}</div>
           {group.channels.map(ch => {
             const active = ch.id === activeId;
             const unread = unreadCounts[ch.id] || 0;
             const mentioned = mentionCounts[ch.id] || 0;
             return (
-              <button key={ch.id} onClick={() => onSelect(ch.id)} style={{ display: 'flex', alignItems: 'center', gap: 7, width: '100%', padding: '6px 10px', border: 'none', background: active ? '#e8f0fe' : 'none', borderRadius: 6, cursor: 'pointer', textAlign: 'left', marginBottom: 1, transition: 'background 0.15s' }} onMouseEnter={e => { if (!active) e.currentTarget.style.background = '#efefef'; }} onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'none'; }}>
-                <span style={{ fontSize: 13, color: active ? '#3b73d8' : '#bbb', flexShrink: 0 }}>#</span>
-                <span style={{ fontSize: 12.5, color: active ? '#1a1a1a' : (unread > 0 ? '#1a1a1a' : '#666'), fontWeight: (active || unread > 0) ? 600 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>{ch.name}</span>
+              <button key={ch.id} onClick={() => onSelect(ch.id)} style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 11px', border: 'none', background: active ? '#ffffff' : 'none', borderRadius: 9, cursor: 'pointer', textAlign: 'left', marginBottom: 1, transition: 'background 0.16s ease', boxShadow: active ? '0 1px 2px rgba(24,27,38,0.05),0 1px 3px rgba(24,27,38,0.04)' : 'none' }} onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'rgba(58,85,217,0.06)'; }} onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'none'; }}>
+                <span style={{ fontSize: 13, color: active ? '#3a55d9' : '#c4c9d4', fontWeight: 600, flexShrink: 0 }}>#</span>
+                <span style={{ fontSize: 13.5, color: active ? '#181b26' : (unread > 0 ? '#181b26' : '#686e7e'), fontWeight: (active || unread > 0) ? 600 : 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>{ch.name}</span>
                 {mentioned > 0 && !active && (
-                  <span style={{ background: '#e03e3e', color: '#fff', fontSize: 10, fontWeight: 700, borderRadius: 10, padding: '1px 6px', minWidth: 18, textAlign: 'center', flexShrink: 0 }}>@</span>
+                  <span style={{ background: '#e07a5f', color: '#fff', fontSize: 10, fontWeight: 700, borderRadius: 10, padding: '1px 7px', minWidth: 18, textAlign: 'center', flexShrink: 0 }}>@</span>
                 )}
                 {unread > 0 && mentioned === 0 && !active && (
-                  <span style={{ background: '#3b73d8', color: '#fff', fontSize: 10, fontWeight: 700, borderRadius: 10, padding: '1px 6px', minWidth: 18, textAlign: 'center', flexShrink: 0 }}>{unread > 99 ? '99+' : unread}</span>
+                  <span style={{ background: '#3a55d9', color: '#fff', fontSize: 10, fontWeight: 700, borderRadius: 10, padding: '1px 7px', minWidth: 18, textAlign: 'center', flexShrink: 0 }}>{unread > 99 ? '99+' : unread}</span>
                 )}
               </button>
             );
@@ -745,7 +751,7 @@ function ChannelEmptyState({ channelId, onJump }) {
       <div style={{ fontSize: 14, color: '#666', maxWidth: 360, lineHeight: 1.6 }}>{prompt.body}</div>
       {prompt.ctaLabel && onJump && (
         <button onClick={() => onJump(prompt.ctaChannel)}
-          style={{ marginTop: 18, background: '#3b73d8', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 18px', fontSize: 13.5, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", boxShadow: '0 2px 8px rgba(59,115,216,0.25)' }}>
+          style={{ marginTop: 18, background: 'linear-gradient(135deg,#3a55d9,#2f44b8)', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 20px', fontSize: 13.5, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", boxShadow: '0 4px 12px rgba(58,85,217,0.28)' }}>
           {prompt.ctaLabel}
         </button>
       )}
@@ -940,7 +946,7 @@ function ChannelSearchPanel({ channel, onJumpInfo }) {
   return (
     <div style={{ position: 'relative', fontFamily: "'DM Sans', sans-serif" }}>
       <button onClick={() => setOpen(o => !o)} title="Search this channel"
-        style={{ background: open ? '#e8f0fe' : 'none', border: 'none', cursor: 'pointer', fontSize: 16, padding: '6px 9px', borderRadius: 6, color: open ? '#3b73d8' : '#888', lineHeight: 1 }}>
+        style={{ background: open ? '#f1f4fe' : 'none', border: 'none', cursor: 'pointer', fontSize: 16, padding: '6px 9px', borderRadius: 8, color: open ? '#3a55d9' : '#969cac', lineHeight: 1 }}>
         🔍
       </button>
       {open && (
@@ -1166,7 +1172,7 @@ function App() {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#fff' }}>
         <style>{`@keyframes mhms-pulse{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}`}</style>
-        <div>{[0,1,2].map(i => <span key={i} style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#3b73d8', margin: '0 3px', animation: 'mhms-pulse 1.2s infinite', animationDelay: `${i*0.2}s` }} />)}</div>
+        <div>{[0,1,2].map(i => <span key={i} style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#3a55d9', margin: '0 3px', animation: 'mhms-pulse 1.2s infinite', animationDelay: `${i*0.2}s` }} />)}</div>
       </div>
     );
   }
@@ -1174,32 +1180,43 @@ function App() {
   const activeChannel = channelMap[activeId];
 
   return (
-    <div style={{ display: 'flex', height: '100vh', fontFamily: "'DM Sans', sans-serif", background: '#fff', border: '1px solid #e8e8e8', borderRadius: 12, overflow: 'hidden' }}>
+    <div style={{ display: 'flex', height: '100vh', fontFamily: "'DM Sans', sans-serif", background: 'radial-gradient(1200px 600px at 80% -10%, #eef1f8 0%, rgba(238,241,248,0) 60%), #e7e9f1', padding: 14, overflow: 'hidden' }}>
       {showWelcome && <WelcomeCard name={currentUser?.name} onOpenGuide={() => dismissWelcome(true)} onDismiss={() => dismissWelcome(false)} />}
+      <div style={{ display: 'flex', flex: 1, background: '#fff', borderRadius: 18, boxShadow: '0 24px 60px rgba(24,27,38,0.14)', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.6)' }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap');
+        :root{
+          --primary-900:#1d2a63;--primary-700:#2f44b8;--primary-600:#3a55d9;--primary-500:#5872ea;--primary-100:#e6ebfb;--primary-50:#f1f4fe;
+          --ink-900:#181b26;--ink-700:#383d4b;--ink-500:#686e7e;--ink-400:#969cac;--ink-300:#c4c9d4;
+          --line:#e7e9f0;--line-soft:#eef0f5;
+          --canvas:#e7e9f1;--sidebar:#f7f8fb;--surface:#ffffff;--raise:#fbfcfe;
+          --warm:#e07a5f;--gold:#c98a2b;--gold-100:#f8eed6;--green:#2faa6a;
+          --shadow-sm:0 1px 2px rgba(24,27,38,0.05),0 1px 3px rgba(24,27,38,0.04);
+          --shadow-md:0 4px 16px rgba(24,27,38,0.07),0 1px 4px rgba(24,27,38,0.05);
+          --shadow-lg:0 24px 60px rgba(24,27,38,0.14);
+        }
         @keyframes mhms-pulse{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}
         .str-chat{height:100%!important;font-family:'DM Sans',sans-serif!important}
         .str-chat__container{height:100%!important}
         .str-chat__main-panel{height:100%!important}
         .str-chat-channel{height:100%!important}
-        .str-chat__channel-header{border-bottom:1px solid #ebebeb!important;background:#fff!important;padding:14px 20px!important;box-shadow:none!important}
-        .str-chat__channel-header-title{font-family:'DM Sans',sans-serif!important;font-weight:500!important;font-size:15px!important;color:#1a1a1a!important}
-        .str-chat__channel-header-info{font-family:'DM Sans',sans-serif!important;font-size:12px!important;color:#999!important}
+        .str-chat__channel-header{border-bottom:1px solid var(--line-soft)!important;background:rgba(255,255,255,0.85)!important;backdrop-filter:blur(8px)!important;padding:16px 24px!important;box-shadow:none!important}
+        .str-chat__channel-header-title{font-family:'DM Sans',sans-serif!important;font-weight:700!important;font-size:16px!important;color:var(--ink-900)!important;letter-spacing:0.005em!important}
+        .str-chat__channel-header-info{font-family:'DM Sans',sans-serif!important;font-size:12px!important;color:var(--ink-400)!important}
         .str-chat__channel-header-menu-button{display:none!important}
         .str-chat__header-hamburger{display:none!important}
         .str-chat__message-input{border-top:none!important;background:transparent!important;padding:0!important;box-shadow:none!important}
-        .str-chat__message-textarea-react-host textarea,.str-chat__message-textarea{font-family:'DM Sans',sans-serif!important;font-size:14px!important;border-radius:8px!important;border:1px solid #e0e0e0!important;background:#fafafa!important;padding:10px 14px!important}
-        .str-chat__message-textarea-react-host textarea:focus,.str-chat__message-textarea:focus{border-color:#3b73d8!important;background:#fff!important;outline:none!important;box-shadow:0 0 0 3px rgba(59,115,216,0.08)!important}
-        .str-chat__list{background:#fff!important;padding:8px 0!important}
-        .str-chat__send-button{background:#3b73d8!important;border-radius:6px!important}
+        .str-chat__message-textarea-react-host textarea,.str-chat__message-textarea{font-family:'DM Sans',sans-serif!important;font-size:14px!important;border-radius:14px!important;border:1px solid var(--line)!important;background:var(--raise)!important;padding:12px 14px!important;line-height:1.6!important;color:var(--ink-700)!important}
+        .str-chat__message-textarea-react-host textarea:focus,.str-chat__message-textarea:focus{border-color:var(--primary-500)!important;background:var(--surface)!important;outline:none!important;box-shadow:0 0 0 4px rgba(58,85,217,0.08)!important}
+        .str-chat__list{background:var(--surface)!important;padding:8px 0!important}
+        .str-chat__send-button{background:linear-gradient(135deg,var(--primary-600),var(--primary-700))!important;border-radius:10px!important;color:#fff!important;box-shadow:0 4px 12px rgba(58,85,217,0.32)!important}
         .str-chat__avatar{display:none!important}
         .str-chat__message-sender-name{display:none!important}
-        .str-chat__date-separator{display:flex!important;align-items:center!important;padding:14px 16px 8px!important;gap:12px!important}
-        .str-chat__date-separator-line{flex:1!important;height:1px!important;background:#ececec!important;border:none!important}
-        .str-chat__date-separator-date{font-family:'DM Sans',sans-serif!important;font-size:11px!important;font-weight:600!important;color:#bbb!important;letter-spacing:0.04em!important;text-transform:uppercase!important;background:transparent!important;padding:0!important}
+        .str-chat__date-separator{display:flex!important;align-items:center!important;padding:16px 18px 12px!important;gap:14px!important}
+        .str-chat__date-separator-line{flex:1!important;height:1px!important;background:var(--line-soft)!important;border:none!important}
+        .str-chat__date-separator-date{font-family:'DM Sans',sans-serif!important;font-size:11px!important;font-weight:600!important;color:var(--ink-400)!important;letter-spacing:0.04em!important;text-transform:uppercase!important;background:transparent!important;padding:0!important}
         .str-chat__jump-to-latest-message,.str-chat__scroll-to-bottom-button{position:absolute!important;bottom:16px!important;right:20px!important;z-index:50!important}
-        .str-chat__scroll-to-bottom-button button,.str-chat__jump-to-latest-message button{background:#3b73d8!important;color:#fff!important;border-radius:20px!important;box-shadow:0 4px 14px rgba(59,115,216,0.35)!important;font-family:'DM Sans',sans-serif!important;border:none!important}
+        .str-chat__scroll-to-bottom-button button,.str-chat__jump-to-latest-message button{background:linear-gradient(135deg,var(--primary-600),var(--primary-700))!important;color:#fff!important;border-radius:20px!important;box-shadow:0 6px 18px rgba(58,85,217,0.32)!important;font-family:'DM Sans',sans-serif!important;border:none!important}
         @media (max-width: 768px){
           .str-chat__channel-header{padding-left:62px!important}
           .cats-wiki{padding-top:64px!important}
@@ -1256,12 +1273,18 @@ function App() {
                       📣 Only the instructor can post in Announcements. Head to General to join the conversation.
                     </div>
                   )}
+                  {(activeId !== ANNOUNCEMENTS_ID || canPostAnnouncements(currentUser)) && (
+                    <div style={{ textAlign: 'center', fontSize: 11.5, fontWeight: 600, color: '#969cac', fontFamily: "'DM Sans', sans-serif", padding: '9px 16px 4px', letterSpacing: '0.005em' }}>
+                      Type @ to mention someone in the group · @mark reaches Dr. Mayfield · @support reaches tech support
+                    </div>
+                  )}
                 </div>
               </Window>
               <Thread additionalMessageInputProps={{ grow: true, minRows: 5, maxRows: 12 }} />
             </Channel>
           </Chat>
         )}
+      </div>
       </div>
     </div>
   );
