@@ -2,7 +2,7 @@
 
 This is the operating manual and current state for the custom community chat built for
 the MHMS / CATS cohort program. Drop this whole folder into the project as knowledge so
-any new conversation starts with full context. **Current version: v40 (live in production).**
+any new conversation starts with full context. **Current version: v42 (live in production).**
 
 ---
 
@@ -139,7 +139,7 @@ Key constants in code:
 
 ---
 
-## Features built and live (as of v32)
+## Features built and live
 
 **Profiles & identity** — first/last name, REQUIRED email, optional bio, optional website/LinkedIn, 12-color avatar picker. Setup modal on first visit, editable from the sidebar footer. Stored in `localStorage` under `cats_profile` and upserted to Stream.
   - **Identity is derived from the email.** `emailToUserId(email)` SHA-256 hashes the normalized (trimmed, lowercased) email and takes the first 24 hex chars, prefixed `cats-`. The same email always produces the same Stream user ID, so a person reconnects as the same account on any device. This is what closes the cross-device duplicate-account gap.
@@ -212,7 +212,7 @@ If reactions, uploads, or user search ever break, re-check these.
 
 ---
 
-## Shipped since v32
+## Shipped since the original build
 
 - **v33** — mobile responsiveness (slide-in sidebar, hamburger, backdrop) and the empty-state fix (EmptyStateIndicator must be passed to `Channel`, not `MessageList`).
 - **v34** — fixed the double hamburger (hide Stream's `str-chat__header-hamburger`).
@@ -222,6 +222,8 @@ If reactions, uploads, or user search ever break, re-check these.
 - **v38** — richer General empty-state: welcomes new arrivals and guides them to the Getting Started wiki with a button (jumps to the wiki channel) before they post. EMPTY_PROMPTS now supports title/body/ctaLabel/ctaChannel/afterCta; ChannelEmptyState takes an `onJump` handler wired to handleChannelSelect.
 - **v39** — one-time welcome card. Shows once per person on first entry after connecting (independent of empty states, so it survives even when channels are busy). Two buttons: "Open the Getting Started guide" (jumps to wiki) and "Got it, take me to the chat" (dismiss). Tracked by a `welcomed` flag on the stored profile; preserved across email migration so people who already saw it are not re-welcomed. NOTE: the flag is per-browser (like all profile data), so a person opening a brand-new device may see it once more there. The fall membership login could make this truly once-per-person.
 - **v40** — visual restyle (part 1 of 2). New design system: CSS-variable palette (indigo primary scale, warm-tinted neutrals, layered surfaces canvas/sidebar/surface), Fraunces serif for the brand mark against DM Sans body, the app now a floating rounded panel with soft shadow on a tinted canvas, gradient logo mark, active-channel "raised card" treatment, muted/harmonious 12-color avatar palette (replaced the loud primaries), restyled composer (rounded, focus ring), reaction pills, header (blur), date separators, and a weighted hint line under the composer: "Type @ to mention someone in the group · @mark reaches Dr. Mayfield · @support reaches tech support". NOTE: message stream still uses left/right bubbles; converting to the flat grouped layout is part 2 (message grouping). Mobile carries the same tokens. Mockup reference: cats-chat-restyle-proposal.html.
+- **v41** — fix: the hover toolbar and reaction picker were anchored to the far edge of the message row, which floated them far from the bubble on a full-width (non-embed) screen. Now anchored next to the bubble (56px in on the content side) for both own and others' messages.
+- **v42** — restored a visible send button. Stream's native send button (`.str-chat__send-button`) was not showing in our custom composer layout (v2 theme positions it inside its own wrapper, which our restyle hid). Added our own gradient airplane button to the composer; it dispatches an Enter keydown on the textarea (the same path Enter-to-send already uses, the reliable trigger) and only fires on non-empty text. Native button hidden via CSS.
 
 ## Roadmap (not yet built)
 
@@ -259,7 +261,7 @@ not go in the wiki.
 ## File inventory in this project package
 
 - `PROJECT_KNOWLEDGE.md` — this document.
-- `source/index.jsx` — the complete current app source (v32). The real working file.
+- `source/index.jsx` — the complete current app source (current version is in the version line at the top of this doc). The real working file.
 - `source/webpack.config.js` — webpack build config.
 - `source/package.json` — dependencies and versions.
 - `cloudflare-workers/token-worker.js` — the JWT token worker (`mhms-chat-token`).
