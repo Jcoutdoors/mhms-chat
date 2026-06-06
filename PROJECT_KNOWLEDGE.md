@@ -2,7 +2,7 @@
 
 This is the operating manual and current state for the custom community chat built for
 the MHMS / CATS cohort program. Drop this whole folder into the project as knowledge so
-any new conversation starts with full context. **Current version: v37 (live in production).**
+any new conversation starts with full context. **Current version: v39 (live in production).**
 
 ---
 
@@ -219,6 +219,8 @@ If reactions, uploads, or user search ever break, re-check these.
 - **v35** — email-required identity. ID derived from email, instructor gating by email allowlist. Closes the cross-device duplicate-account gap.
 - **v36** — first attempt at taller inputs (minRows alone, which the SDK ignores without grow) plus the "Your account" wiki section.
 - **v37** — taller inputs actually working: `grow={true}` is required or the SDK caps the textarea at maxRows=1 and ignores minRows. Main and thread now use grow + minRows=5 + maxRows=12. Also added an adaptive setup-form intro note (returning users see a "your data is safe, this just links your devices" reassurance; first-timers see a short intro).
+- **v38** — richer General empty-state: welcomes new arrivals and guides them to the Getting Started wiki with a button (jumps to the wiki channel) before they post. EMPTY_PROMPTS now supports title/body/ctaLabel/ctaChannel/afterCta; ChannelEmptyState takes an `onJump` handler wired to handleChannelSelect.
+- **v39** — one-time welcome card. Shows once per person on first entry after connecting (independent of empty states, so it survives even when channels are busy). Two buttons: "Open the Getting Started guide" (jumps to wiki) and "Got it, take me to the chat" (dismiss). Tracked by a `welcomed` flag on the stored profile; preserved across email migration so people who already saw it are not re-welcomed. NOTE: the flag is per-browser (like all profile data), so a person opening a brand-new device may see it once more there. The fall membership login could make this truly once-per-person.
 
 ## Roadmap (not yet built)
 
