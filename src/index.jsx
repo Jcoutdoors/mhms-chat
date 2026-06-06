@@ -947,7 +947,9 @@ function ChannelSearchPanel({ channel, onJumpInfo }) {
   return (
     <div style={{ position: 'relative', fontFamily: "'DM Sans', sans-serif" }}>
       <button onClick={() => setOpen(o => !o)} title="Search this channel"
-        style={{ background: open ? '#f1f4fe' : 'none', border: 'none', cursor: 'pointer', fontSize: 16, padding: '6px 9px', borderRadius: 8, color: open ? '#3a55d9' : '#969cac', lineHeight: 1 }}>
+        style={{ background: open ? '#f1f4fe' : '#ffffff', border: open ? '1px solid #c9d4f5' : '1px solid #e7e9f0', cursor: 'pointer', fontSize: 15, width: 38, height: 38, borderRadius: 10, color: open ? '#3a55d9' : '#686e7e', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 2px rgba(24,27,38,0.05)', transition: 'all 0.16s ease' }}
+        onMouseEnter={e => { if (!open) { e.currentTarget.style.background = '#f1f4fe'; e.currentTarget.style.borderColor = '#c9d4f5'; e.currentTarget.style.color = '#3a55d9'; } }}
+        onMouseLeave={e => { if (!open) { e.currentTarget.style.background = '#ffffff'; e.currentTarget.style.borderColor = '#e7e9f0'; e.currentTarget.style.color = '#686e7e'; } }}>
         🔍
       </button>
       {open && (
@@ -1290,7 +1292,7 @@ function App() {
               <Window>
                 <div style={{ position: 'relative' }}>
                   <ChannelHeader />
-                  <div style={{ position: 'absolute', top: 8, right: 14, zIndex: 60 }}>
+                  <div style={{ position: 'absolute', top: 13, right: 24, zIndex: 60 }}>
                     <ChannelSearchPanel channel={activeChannel} />
                   </div>
                 </div>
