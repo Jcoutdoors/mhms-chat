@@ -2,7 +2,7 @@
 
 This is the operating manual and current state for the custom community chat built for
 the MHMS / CATS cohort program. Drop this whole folder into the project as knowledge so
-any new conversation starts with full context. **Current version: v32 (live in production).**
+any new conversation starts with full context. **Current version: v37 (live in production).**
 
 ---
 
@@ -135,13 +135,18 @@ Key constants in code:
 - `ALL_CHANNELS` = all channels EXCEPT those in `STATIC_CHANNELS` (the wiki is not a Stream channel).
 - `STATIC_CHANNELS = ['cats-getting-started']`
 - `ANNOUNCEMENTS_ID = 'cats-announcements'`, `GETTING_STARTED_ID = 'cats-getting-started'`
-- `canPostAnnouncements(userId)` checks `ANNOUNCER_PREFIXES = ['cats-mark','cats-mayfield','cats-jonathan','jonathan']`. This same check gates who can use `@everyone`.
+- Instructor gating: `canPostAnnouncements(user)` reads the `instructor` flag set from `INSTRUCTOR_EMAILS` at setup (see Profiles & identity above). This same flag gates who can use `@everyone`. (Earlier versions gated by ID prefix; that was replaced in v35 when IDs became email hashes.)
 
 ---
 
 ## Features built and live (as of v32)
 
-**Profiles** — first/last name, optional bio, optional website/LinkedIn, 12-color avatar picker. Setup modal on first visit, editable from the sidebar footer. Stored in `localStorage` under `cats_profile` and upserted to Stream.
+**Profiles & identity** — first/last name, REQUIRED email, optional bio, optional website/LinkedIn, 12-color avatar picker. Setup modal on first visit, editable from the sidebar footer. Stored in `localStorage` under `cats_profile` and upserted to Stream.
+  - **Identity is derived from the email.** `emailToUserId(email)` SHA-256 hashes the normalized (trimmed, lowercased) email and takes the first 24 hex chars, prefixed `cats-`. The same email always produces the same Stream user ID, so a person reconnects as the same account on any device. This is what closes the cross-device duplicate-account gap.
+  - The email field shows a short line explaining it keeps the account synced across devices. Email is validated (required, basic format check).
+  - **Existing pre-email profiles:** on load, if a stored profile has no email, the user is routed into the setup form (name and color pre-filled) to add one once. Adding the email rederives their ID from the email and connects on the stable ID. There was essentially no message history at rollout (one test thread), so old-message authorship was not a concern.
+  - **Instructor status is gated by email, not by ID.** `INSTRUCTOR_EMAILS = ['jonathan@nexgenrva.com','dr.mark.mayfield@gmail.com']`. At setup, `isInstructorEmail()` sets an `instructor` boolean on the profile, which is stored, passed to Stream on `connectUser` (so it travels on the user object and on every message's `msg.user`), and read by `canPostAnnouncements(user)`. This replaced the old ID-prefix gating, which broke once IDs became email-hash strings.
+  - `canPostAnnouncements(user)` now takes a USER OBJECT (reads `user.instructor`), not an ID string. Call sites: the announcements input gate, the `@everyone` autocomplete option, and the inbound `@everyone` sender check (`canPostAnnouncements(msg.user)`).
 
 **Messaging UI** — white premium UI, DM Sans font, colored initial-avatars. Custom message component: full name above bubble, own messages right/blue, others left/gray. Click name/avatar to open a profile card.
 
@@ -161,7 +166,9 @@ Key constants in code:
 
 **Email routing (via notification worker)** — `@mark` / `@dr. mayfield` → Mark's email; `@support` / `@help` → Jonathan's email. Independent of the in-chat alerts.
 
-**Getting Started wiki** — static formatted read-only page. Sections: Channels, Announcements, Posting & replying, Mentions, Reaching the instructor (@mark), Tech help & support (@support/@help), Notifications, Searching messages, Sharing files, Need help.
+**Getting Started wiki** — static formatted read-only page. Sections: Channels, Announcements, Posting & replying, Mentions, Reaching the instructor (@mark), Tech help & support (@support/@help), Notifications, Searching messages, Your account (same email = same account on any device), Sharing files, Need help.
+
+**Setup form intro note (v37)** — the profile setup form shows an adaptive note at the top during signup. Returning users (stored profile with a name but no email) see a "welcome back, your data is safe, this just links your devices" reassurance. First-timers see a short "here's how this works" intro. Controlled by `showIntro` (signup only) and `isReturning` props on `ProfileForm`.
 
 **Unread / mention badges** — blue number = unread count, red `@` = mention. Clears on opening the channel.
 
@@ -177,6 +184,9 @@ Key constants in code:
 **Deep linking** — `getInitialChannelId()` reads a `?channel=` param or hash; defaults to `cats-general`.
 
 **Announcements read-only** — for non-instructors the input is replaced with a notice directing them to General.
+
+**Mobile responsiveness (v33/v34)** — at <=768px the sidebar becomes a slide-in overlay with a dark backdrop, toggled by a boxed hamburger button at top-left of the content area. Selecting a channel, tapping the backdrop, or tapping the X closes it. Desktop layout is unchanged. `isMobile` tracks `window.innerWidth <= 768` via a resize listener. Header and wiki get extra left/top padding on mobile so the hamburger does not overlap.
+  - **v34 fix:** Stream's ChannelHeader renders its own hamburger (`str-chat__header-hamburger`). Our old CSS hid an outdated class name, so after an SDK update Stream's button reappeared next to ours (double hamburger). Fix: hide `.str-chat__header-hamburger` (kept the old rule too as a harmless fallback).
 
 ---
 
@@ -202,12 +212,17 @@ If reactions, uploads, or user search ever break, re-check these.
 
 ---
 
+## Shipped since v32
+
+- **v33** — mobile responsiveness (slide-in sidebar, hamburger, backdrop) and the empty-state fix (EmptyStateIndicator must be passed to `Channel`, not `MessageList`).
+- **v34** — fixed the double hamburger (hide Stream's `str-chat__header-hamburger`).
+- **v35** — email-required identity. ID derived from email, instructor gating by email allowlist. Closes the cross-device duplicate-account gap.
+- **v36** — first attempt at taller inputs (minRows alone, which the SDK ignores without grow) plus the "Your account" wiki section.
+- **v37** — taller inputs actually working: `grow={true}` is required or the SDK caps the textarea at maxRows=1 and ignores minRows. Main and thread now use grow + minRows=5 + maxRows=12. Also added an adaptive setup-form intro note (returning users see a "your data is safe, this just links your devices" reassurance; first-timers see a short intro).
+
 ## Roadmap (not yet built)
 
-Priority order, with the two flagship items deliberately saved for their own focused builds:
-
-1. **Mobile responsiveness** (recommended next) — the 240px sidebar next to the chat is cramped on phones. Needs a collapsible sidebar, hamburger toggle, responsive widths. Touches a lot of UI, so it gets its own careful pass. Affects real students daily.
-2. **Direct messaging** — 1:1 channels (Stream supports natively). Real UI build: DM list, start-a-DM, unread handling. The biggest remaining feature; its own project.
+1. **Direct messaging** — 1:1 channels (Stream supports natively). Real UI build: DM list, start-a-DM, unread handling. The biggest remaining feature; its own project.
 
 Smaller polish, slot in anytime:
 - **Message grouping** — collapse consecutive messages from one person to show name/avatar once. Low effort, visual.
@@ -216,6 +231,8 @@ Smaller polish, slot in anytime:
 Parked unless a need appears:
 - **Profile photo uploads** — needs an image backend (e.g. Cloudflare R2).
 - **Weekly digest email to Mark** — a scheduled (cron) job.
+
+**Fall cohort plan:** move the course behind a free Squarespace membership login. That gives a real logged-in identity the chat can read, which permanently solves identity and retires the email-derived-ID approach (which is the interim solution while the course sits on an unlisted page). When that happens, identity should switch to the Squarespace member identity.
 
 Dropped: calendar feature.
 
