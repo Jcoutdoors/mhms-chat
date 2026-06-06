@@ -127,7 +127,7 @@ function requestNotificationPermission() {
 function fireMentionAlert(title, body) {
   try {
     if ('Notification' in window && Notification.permission === 'granted') {
-      const n = new Notification(title, { body, icon: 'https://jcoutdoors.github.io/mhms-chat/favicon.ico' });
+      const n = new Notification(title, { body, icon: 'https://chat.mentalhealthmadesimple.life/favicon.ico' });
       setTimeout(() => { try { n.close(); } catch (e) {} }, 6000);
     }
   } catch (e) {}
@@ -633,7 +633,7 @@ function MembersList({ chatClient, activeChannel, currentUserId }) {
   });
 
   return (
-    <div style={{ padding: '10px 10px 6px', borderTop: '1px solid #eef0f5', flex: 1, overflowY: 'auto', minHeight: 0 }}>
+    <div style={{ padding: '10px 10px 16px', borderTop: '1px solid #eef0f5' }}>
       <div style={{ fontSize: 10.5, fontWeight: 700, color: '#969cac', letterSpacing: '0.09em', textTransform: 'uppercase', padding: '0 8px', marginBottom: 6 }}>
         Members {onlineCount > 0 && <span style={{ color: '#22c55e' }}>· {onlineCount} online</span>}
       </div>
@@ -663,11 +663,12 @@ function Sidebar({ groups, activeId, onSelect, currentUser, chatClient, activeCh
   const name = currentUser?.name || '';
   const color = currentUser?.color || '#3b73d8';
 
-  const baseStyle = { width: 264, minWidth: 264, background: 'linear-gradient(180deg,#f8f9fc 0%, #f4f6fa 100%)', borderRight: '1px solid #eef0f5', display: 'flex', flexDirection: 'column', fontFamily: "'DM Sans', sans-serif", overflowY: 'auto' };
+  const baseStyle = { width: 264, minWidth: 264, background: 'linear-gradient(180deg,#f8f9fc 0%, #f4f6fa 100%)', borderRight: '1px solid #eef0f5', display: 'flex', flexDirection: 'column', fontFamily: "'DM Sans', sans-serif", overflowY: 'auto', WebkitOverflowScrolling: 'touch' };
   const mobileStyle = isMobile ? {
-    position: 'fixed', top: 0, left: 0, height: '100vh', zIndex: 1100,
+    position: 'fixed', top: 0, left: 0, height: '100vh', maxHeight: '100vh', zIndex: 1100,
     transform: mobileNavOpen ? 'translateX(0)' : 'translateX(-100%)',
     transition: 'transform 0.25s ease', boxShadow: mobileNavOpen ? '2px 0 24px rgba(0,0,0,0.18)' : 'none',
+    overflowY: 'auto', WebkitOverflowScrolling: 'touch',
   } : {};
 
   return (
@@ -714,7 +715,7 @@ function Sidebar({ groups, activeId, onSelect, currentUser, chatClient, activeCh
 
       <MembersList chatClient={chatClient} activeChannel={activeChannel} currentUserId={currentUser?.id} />
 
-      <div style={{ marginTop: 'auto', padding: '10px 14px', borderTop: '1px solid #ebebeb', flexShrink: 0 }}>
+      <div style={{ padding: '10px 14px', borderTop: '1px solid #eef0f5', flexShrink: 0 }}>
         <button onClick={onEditProfile} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '4px', borderRadius: 8, transition: 'background 0.15s' }} onMouseEnter={e => e.currentTarget.style.background = '#efefef'} onMouseLeave={e => e.currentTarget.style.background = 'none'} title="Edit your profile">
           <div style={{ position: 'relative' }}>
             <Avatar name={name} color={color} size={28} />
@@ -1011,6 +1012,8 @@ function App() {
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth <= 768 : false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const clientRef = useRef(null);
+  const activeIdRef = useRef(activeId);
+  useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
 
   useEffect(() => {
     function onResize() { setIsMobile(window.innerWidth <= 768); }
@@ -1041,12 +1044,48 @@ function App() {
 
       const initialId = getInitialChannelId();
       const initialChDef = ALL_CHANNELS.find(c => c.id === initialId) || ALL_CHANNELS.find(c => c.id === 'cats-general');
-      const initialCh = client.channel('messaging', initialChDef.id, { name: initialChDef.name, members: [profile.id] });
-      await initialCh.watch({ presence: true });
-      const map = { [initialChDef.id]: initialCh };
+
+      // Watch ALL cohort channels on login (not just the active one), so message.new
+      // fires for every channel and unread/mention badges populate even for channels
+      // the user has not opened yet this session. Cohort is small, so watching ~15
+      // channels at connect is cheap. The active channel is watched with presence.
+      const map = {};
+      await Promise.all(ALL_CHANNELS.map(async (chDef) => {
+        try {
+          const ch = client.channel('messaging', chDef.id, { name: chDef.name, members: [profile.id] });
+          await ch.watch(chDef.id === initialChDef.id ? { presence: true } : undefined);
+          map[chDef.id] = ch;
+        } catch (e) {
+          // if one channel fails to watch, keep going with the rest
+        }
+      }));
       setChatClient(client);
       setChannelMap(map);
       setActiveId(initialChDef.id);
+
+      // Seed badges from Stream's server-side read state, so users see everything they
+      // missed since their LAST session, not just messages that arrive while connected.
+      // countUnread()/countUnreadMentions() require read_events enabled on the channel type.
+      try {
+        const seededUnread = {};
+        const seededMentions = {};
+        ALL_CHANNELS.forEach((chDef) => {
+          const ch = map[chDef.id];
+          if (!ch) return;
+          const u = ch.countUnread();
+          const m = ch.countUnreadMentions();
+          if (u > 0) seededUnread[chDef.id] = u;
+          if (m > 0) seededMentions[chDef.id] = m;
+        });
+        // Don't show a badge on the channel we're landing in; mark it read instead.
+        delete seededUnread[initialChDef.id];
+        delete seededMentions[initialChDef.id];
+        setUnreadCounts(seededUnread);
+        setMentionCounts(seededMentions);
+        if (map[initialChDef.id]) { try { await map[initialChDef.id].markRead(); } catch (e) {} }
+      } catch (e) {
+        // if read state isn't available, fall back to live-only counting
+      }
 
       const detectAndAlert = (event, channelLabelMap) => {
         const chId = event.channel_id || event.cid?.replace('messaging:', '');
@@ -1060,6 +1099,15 @@ function App() {
         const myName = (profile.name || '').toLowerCase();
         const myFirst = myName.split(' ')[0];
         if (senderId === myId) return; // don't alert on your own messages
+
+        // If the message lands in the channel the user is currently viewing, mark it read
+        // on Stream instead of badging it.
+        if (chId === activeIdRef.current) {
+          const ch = clientRef.current && clientRef.current.activeChannels
+            ? clientRef.current.activeChannels['messaging:' + chId] : null;
+          if (ch && ch.markRead) { try { ch.markRead(); } catch (e) {} }
+          return;
+        }
 
         // Did this message mention me, or @everyone from an instructor?
         const mentionedMe = (myFirst && lower.includes('@' + myFirst)) || (myName && lower.includes('@' + myName));
@@ -1098,7 +1146,9 @@ function App() {
     setUnreadCounts(prev => ({ ...prev, [id]: 0 }));
     setMentionCounts(prev => ({ ...prev, [id]: 0 }));
     if (STATIC_CHANNELS.includes(id)) return;
-    await ensureChannel(id);
+    const ch = await ensureChannel(id);
+    // Persist the read state to Stream so the cleared badge sticks across sessions/devices.
+    if (ch) { try { await ch.markRead(); } catch (e) {} }
   }
 
   useEffect(() => {
