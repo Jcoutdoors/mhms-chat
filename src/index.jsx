@@ -204,7 +204,7 @@ const btnPrimary = {
   borderRadius: 8, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
 };
 
-function ProfileForm({ initial = {}, onSave, title, subtitle }) {
+function ProfileForm({ initial = {}, onSave, title, subtitle, showIntro = false, isReturning = false }) {
   const [firstName, setFirstName] = useState(initial.firstName || '');
   const [lastName, setLastName] = useState(initial.lastName || '');
   const [email, setEmail] = useState(initial.email || '');
@@ -233,6 +233,19 @@ function ProfileForm({ initial = {}, onSave, title, subtitle }) {
             <div style={{ fontSize: 13, color: '#999', marginTop: 2 }}>{subtitle}</div>
           </div>
         </div>
+        {showIntro && (
+          <div style={{ background: isReturning ? '#f0f6ff' : '#f7f7f7', border: '1px solid #e6eefb', borderRadius: 10, padding: '13px 15px', marginBottom: 18, fontSize: 12.5, color: '#555', lineHeight: 1.55 }}>
+            {isReturning ? (
+              <span>
+                <strong style={{ color: '#2456b0' }}>Welcome back!</strong> Adding your email just links this device to your account. Your profile and your place in the community are safe, nothing to set up again. This simply lets you sign in across your phone and laptop seamlessly, with no separate account to manage.
+              </span>
+            ) : (
+              <span>
+                <strong style={{ color: '#1a1a1a' }}>First time here?</strong> Add your name and email to join. Your email is how you sign in, so use the same one on any device and you will always come back as you, with no separate account to set up.
+              </span>
+            )}
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
           <div>
             <label style={labelStyle}>First Name</label>
@@ -1088,7 +1101,8 @@ function App() {
 
   if (showProfileForm) {
     const stored = getStoredProfile();
-    return <ProfileForm initial={stored || {}} onSave={handleProfileSave} title={isSignup ? 'Welcome to CATS Program' : 'Edit Your Profile'} subtitle={isSignup ? 'Set up your profile to get started' : 'Update your info anytime'} />;
+    const isReturning = !!(stored && stored.firstName && !stored.email);
+    return <ProfileForm initial={stored || {}} onSave={handleProfileSave} title={isSignup ? 'Welcome to CATS Program' : 'Edit Your Profile'} subtitle={isSignup ? 'Set up your profile to get started' : 'Update your info anytime'} showIntro={isSignup} isReturning={isReturning} />;
   }
 
   if (!chatClient || Object.keys(channelMap).length === 0) {
@@ -1176,7 +1190,7 @@ function App() {
                       }
                     }} />
                     <div style={{ flex: 1 }}>
-                      <MessageInput minRows={5} />
+                      <MessageInput grow={true} minRows={5} maxRows={12} />
                     </div>
                   </div>
                   ) : (
@@ -1186,7 +1200,7 @@ function App() {
                   )}
                 </div>
               </Window>
-              <Thread additionalMessageInputProps={{ minRows: 5 }} />
+              <Thread additionalMessageInputProps={{ grow: true, minRows: 5, maxRows: 12 }} />
             </Channel>
           </Chat>
         )}
