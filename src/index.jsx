@@ -393,6 +393,37 @@ function EmojiButton({ onEmojiSelect }) {
 }
 
 // Render message text with @mentions highlighted.
+// Turn a plain string into an array of text and clickable link elements.
+// Detects http(s):// URLs and bare www. URLs, and renders them as links that
+// open in a new tab. Used on the non-mention text segments below.
+function linkifyText(str, keyStart) {
+  if (!str) return [str];
+  // Match http(s) URLs or bare www. URLs. Trailing punctuation is trimmed below.
+  const urlRe = /((?:https?:\/\/|www\.)[^\s]+)/gi;
+  const out = [];
+  let last = 0; let m; let key = keyStart;
+  while ((m = urlRe.exec(str)) !== null) {
+    let url = m[0];
+    // Don't swallow trailing sentence punctuation that is unlikely to be part of the URL.
+    let trail = '';
+    const trailMatch = url.match(/[.,;:!?)\]}'"]+$/);
+    if (trailMatch) { trail = trailMatch[0]; url = url.slice(0, url.length - trail.length); }
+    if (m.index > last) out.push(str.slice(last, m.index));
+    const href = url.startsWith('http') ? url : 'https://' + url;
+    out.push(
+      <a key={'lnk' + (key++)} href={href} target="_blank" rel="noopener noreferrer"
+        style={{ color: '#3a55d9', textDecoration: 'underline', wordBreak: 'break-word' }}
+        onClick={e => e.stopPropagation()}>
+        {url}
+      </a>
+    );
+    if (trail) out.push(trail);
+    last = m.index + m[0].length;
+  }
+  if (last < str.length) out.push(str.slice(last));
+  return out;
+}
+
 function renderTextWithMentions(text) {
   if (!text) return text;
   const names = memberNameRegistry.names || [];
@@ -402,20 +433,27 @@ function renderTextWithMentions(text) {
     .sort((a, b) => b.length - a.length)
     .map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const tokens = ['everyone', ...escaped].filter(Boolean);
-  if (tokens.length === 0) return text;
-  const re = new RegExp('@(' + tokens.join('|') + ')\\b', 'gi');
+  const re = tokens.length ? new RegExp('@(' + tokens.join('|') + ')\\b', 'gi') : null;
   const parts = [];
   let last = 0; let m; let key = 0;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) parts.push(text.slice(last, m.index));
-    parts.push(
-      <span key={key++} style={{ background: '#e8f0fe', color: '#2456b0', fontWeight: 600, borderRadius: 4, padding: '0 3px' }}>
-        {m[0]}
-      </span>
-    );
-    last = m.index + m[0].length;
+  if (re) {
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > last) {
+        // linkify the plain text between mentions
+        linkifyText(text.slice(last, m.index), key).forEach(p => parts.push(p));
+        key += 50;
+      }
+      parts.push(
+        <span key={'mnt' + (key++)} style={{ background: '#e8f0fe', color: '#2456b0', fontWeight: 600, borderRadius: 4, padding: '0 3px' }}>
+          {m[0]}
+        </span>
+      );
+      last = m.index + m[0].length;
+    }
   }
-  if (last < text.length) parts.push(text.slice(last));
+  if (last < text.length) {
+    linkifyText(text.slice(last), key).forEach(p => parts.push(p));
+  }
   return parts.length ? parts : text;
 }
 
@@ -875,7 +913,7 @@ function GettingStartedWiki() {
         </Section>
 
         <Section icon="🎓" title="Reaching the instructor">
-          To get Dr. Mayfield's attention, type @mark or @dr. mayfield in your message. He gets an email notification so your question reaches him even when he is not in the chat. Use this when you need him specifically rather than the whole group.
+          To get Dr. Mayfield's attention, type @mark, @dr. mayfield, or @dr. mark mayfield in your message. He gets an email notification so your question reaches him even when he is not in the chat. Use this when you need him specifically rather than the whole group.
         </Section>
 
         <Section icon="🛟" title="Tech help & support">
@@ -1339,7 +1377,7 @@ function App() {
                   )}
                   {(activeId !== ANNOUNCEMENTS_ID || canPostAnnouncements(currentUser)) && (
                     <div style={{ textAlign: 'center', fontSize: 11.5, fontWeight: 600, color: '#969cac', fontFamily: "'DM Sans', sans-serif", padding: '9px 16px 4px', letterSpacing: '0.005em' }}>
-                      Type @ to mention someone in the group · @mark reaches Dr. Mayfield · @support reaches tech support
+                      Type @ to mention someone in the group · @mark or @dr. mark mayfield reaches Dr. Mayfield · @support reaches tech support
                     </div>
                   )}
                 </div>
