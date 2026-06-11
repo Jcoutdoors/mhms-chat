@@ -1324,6 +1324,46 @@ function App() {
 
   const activeChannel = channelMap[activeId];
 
+  // Attach real Stream mentions (mentioned_users) when sending, so @name and @everyone
+  // register as genuine mentions. This is what makes the orange @ badge fire live AND
+  // persist across sessions (Stream's countUnreadMentions only counts real mentions).
+  // Our custom autocomplete inserts plain text, so Stream never recorded mentions before.
+  const submitWithMentions = async (messageOrText, channelCid, customMessageData, sendOptions) => {
+    // Stream's submit passes a message object {text, attachments, mentioned_users, parent, ...}
+    const msg = (typeof messageOrText === 'string') ? { text: messageOrText } : (messageOrText || {});
+    const text = msg.text || '';
+    const lower = text.toLowerCase();
+    const ch = activeChannel;
+    if (!ch) return;
+
+    const mentionedIds = new Set();
+
+    // Match @name against the roster (longest names first so full names win).
+    const roster = (rosterMembers || []).slice().sort((a, b) => (b.name || '').length - (a.name || '').length);
+    roster.forEach(u => {
+      if (!u || !u.name) return;
+      if (lower.includes('@' + u.name.toLowerCase())) mentionedIds.add(u.id);
+    });
+
+    // @everyone (instructor only): mention all channel members.
+    if (lower.includes('@everyone') && canPostAnnouncements(currentUser)) {
+      const members = ch.state && ch.state.members ? Object.keys(ch.state.members) : [];
+      members.forEach(id => { if (id !== currentUser?.id) mentionedIds.add(id); });
+    }
+
+    const payload = {
+      ...msg,
+      mentioned_users: Array.from(mentionedIds),
+    };
+    delete payload.parent; // parent is passed separately below for threads
+    try {
+      await ch.sendMessage({ ...payload, parent_id: msg.parent?.id }, sendOptions);
+    } catch (e) {
+      // fall back to a plain send if anything about the mention payload is rejected
+      try { await ch.sendMessage({ text }, sendOptions); } catch (e2) {}
+    }
+  };
+
   return (
     <div style={{ display: 'flex', height: isMobile ? '100dvh' : '100vh', minHeight: isMobile ? '100dvh' : undefined, fontFamily: "'DM Sans', sans-serif", background: 'radial-gradient(1200px 600px at 80% -10%, #eef1f8 0%, rgba(238,241,248,0) 60%), #e7e9f1', padding: isMobile ? 0 : 14, overflow: 'hidden' }}>
       {showWelcome && <WelcomeCard name={currentUser?.name} onOpenGuide={() => dismissWelcome(true)} onDismiss={() => dismissWelcome(false)} />}
@@ -1422,7 +1462,7 @@ function App() {
                       }
                     }} />
                     <div style={{ flex: 1 }}>
-                      <MessageInput grow={true} minRows={isMobile ? 1 : 5} maxRows={isMobile ? 6 : 12} />
+                      <MessageInput grow={true} minRows={isMobile ? 1 : 5} maxRows={isMobile ? 6 : 12} overrideSubmitHandler={submitWithMentions} />
                     </div>
                     <button title="Send" onClick={() => {
                       const ta = document.querySelector('.str-chat__message-textarea-react-host textarea, .str-chat__message-textarea');
