@@ -1378,8 +1378,8 @@ function App() {
         <a href={CONSULT_LINK} target="_blank" rel="noopener noreferrer"
           style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, flexShrink: 0, background: 'linear-gradient(135deg, #3a55d9 0%, #2f44b8 100%)', color: '#fff', textDecoration: 'none', fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600, padding: '9px 16px', letterSpacing: '0.01em' }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
-          <span>{isMobile ? 'Live consultation with Dr. Mayfield' : 'Join the live consultation with Dr. Mayfield'}</span>
-          <span style={{ background: 'rgba(255,255,255,0.2)', borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>Join →</span>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{isMobile ? 'Live consults · every other week · 6pm MST' : 'Live consultations with Dr. Mayfield, every other week at 6pm MST (7pm CST / 8pm EST / 5pm PST). Full schedule in Getting Started.'}</span>
+          <span style={{ background: 'rgba(255,255,255,0.2)', borderRadius: 6, padding: '2px 9px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 }}>Join link</span>
         </a>
         {isMobile && !mobileNavOpen && (
           <button onClick={() => setMobileNavOpen(true)} title="Open menu"
