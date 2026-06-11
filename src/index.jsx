@@ -72,6 +72,12 @@ function canPostAnnouncements(user) {
 }
 const ANNOUNCEMENTS_ID = 'cats-announcements';
 const GETTING_STARTED_ID = 'cats-getting-started';
+
+// Live consultation details. Mark hosts a recurring Zoom consult; the join link is
+// fixed across sessions. Update CONSULT_DATES each term and CONSULT_LINK if it ever changes.
+const CONSULT_LINK = 'https://ccu.zoom.us/j/2303075413';
+const CONSULT_TIME = '6pm MST (7pm CST / 8pm EST / 5pm PST)';
+const CONSULT_DATES = ['Jun 10', 'Jun 24', 'Jul 8', 'Jul 22', 'Aug 5', 'Aug 19'];
 // Static channels render as a wiki page, not a Stream chat feed.
 const STATIC_CHANNELS = [GETTING_STARTED_ID];
 
@@ -901,6 +907,27 @@ function GettingStartedWiki() {
         <h1 style={{ fontSize: 22, fontWeight: 700, color: '#1a1a1a', marginBottom: 6 }}>Welcome to the CATS Community</h1>
         <p style={{ fontSize: 14, color: '#777', marginBottom: 26, lineHeight: 1.6 }}>This is your space to connect with the cohort, ask questions, and learn together. Here is how everything works.</p>
 
+        {/* Live consultation card */}
+        <div style={{ borderRadius: 16, padding: '22px 24px', marginBottom: 28, background: 'linear-gradient(135deg, #3a55d9 0%, #2f44b8 100%)', boxShadow: '0 12px 30px rgba(47,68,184,0.28)', color: '#fff' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 20 }}>🎥</span>
+            <span style={{ fontSize: 17, fontWeight: 700, letterSpacing: '0.01em' }}>Live Consultations with Dr. Mayfield</span>
+          </div>
+          <p style={{ fontSize: 13.5, lineHeight: 1.6, color: 'rgba(255,255,255,0.92)', marginBottom: 14 }}>
+            Mark hosts a live Zoom consultation every other week at <strong>{CONSULT_TIME}</strong>. Same link every time, so you can join right from here.
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginBottom: 18 }}>
+            {CONSULT_DATES.map(d => (
+              <span key={d} style={{ fontSize: 12, fontWeight: 600, background: 'rgba(255,255,255,0.16)', color: '#fff', padding: '4px 10px', borderRadius: 20 }}>{d}</span>
+            ))}
+          </div>
+          <a href={CONSULT_LINK} target="_blank" rel="noopener noreferrer"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#fff', color: '#2f44b8', fontSize: 14, fontWeight: 700, padding: '11px 20px', borderRadius: 10, textDecoration: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.16)' }}>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+            Join our consultation
+          </a>
+        </div>
+
         <Section icon="💬" title="Channels">
           The sidebar on the left holds all your channels. Each course module has its own channel for module-specific discussion. The Community channels (General, Weekly Wins, Readings & Resources) are for everything else. Click any channel to open it.
         </Section>
@@ -1347,9 +1374,16 @@ function App() {
       `}</style>
       <Sidebar groups={CHANNEL_GROUPS} activeId={activeId} onSelect={handleChannelSelect} currentUser={currentUser} chatClient={chatClient} activeChannel={activeChannel} onEditProfile={() => setShowProfileForm(true)} unreadCounts={unreadCounts} mentionCounts={mentionCounts} isMobile={isMobile} mobileNavOpen={mobileNavOpen} onCloseMobileNav={() => setMobileNavOpen(false)} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', minHeight: 0, minWidth: 0 }}>
+        {/* Persistent live-consult bar, visible across all channels */}
+        <a href={CONSULT_LINK} target="_blank" rel="noopener noreferrer"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, flexShrink: 0, background: 'linear-gradient(135deg, #3a55d9 0%, #2f44b8 100%)', color: '#fff', textDecoration: 'none', fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600, padding: '9px 16px', letterSpacing: '0.01em' }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+          <span>{isMobile ? 'Live consultation with Dr. Mayfield' : 'Join the live consultation with Dr. Mayfield'}</span>
+          <span style={{ background: 'rgba(255,255,255,0.2)', borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>Join →</span>
+        </a>
         {isMobile && !mobileNavOpen && (
           <button onClick={() => setMobileNavOpen(true)} title="Open menu"
-            style={{ position: 'absolute', top: 12, left: 12, zIndex: 70, background: '#fff', border: '1px solid #e8e8e8', borderRadius: 8, width: 38, height: 38, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, cursor: 'pointer', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+            style={{ position: 'absolute', top: 50, left: 12, zIndex: 70, background: '#fff', border: '1px solid #e8e8e8', borderRadius: 8, width: 38, height: 38, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, cursor: 'pointer', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
             <span style={{ width: 16, height: 2, background: '#444', borderRadius: 2 }} />
             <span style={{ width: 16, height: 2, background: '#444', borderRadius: 2 }} />
             <span style={{ width: 16, height: 2, background: '#444', borderRadius: 2 }} />
