@@ -2,7 +2,7 @@
 
 This is the operating manual and current state for the custom community chat built for
 the MHMS / CATS cohort program. Drop this whole folder into the project as knowledge so
-any new conversation starts with full context. **Current version: v49 (live in production).**
+any new conversation starts with full context. **Current version: v52 (live in production).**
 
 ---
 
@@ -230,6 +230,7 @@ If reactions, uploads, or user search ever break, re-check these.
 - **v47** — search icon restyle. The channel search was a bare faint emoji stranded in the far-right corner of the header, hard to locate. Now a bordered boxed button (white background, 1px border, 38x38, radius 10, soft shadow, indigo hover) matching the send button, moved inward (right:24) and vertically centered (top:13) in the 64px header.
 - **v48** — copy update to match the notification worker's added `@dr. mark mayfield` route. Updated the Getting Started wiki "Reaching the instructor" section and the composer hint line under the message box to list `@dr. mark mayfield` alongside `@mark`. (Worker change is separate, deployed in Cloudflare; see notification-worker.js.)
 - **v49** — clickable links in messages. Message text previously rendered URLs as plain dead text. Added a `linkifyText` helper that detects http(s) and bare `www.` URLs in the non-mention text segments and renders them as underlined indigo links opening in a new tab (trailing sentence punctuation is left outside the link; emails are not linked). Mention highlighting is unchanged and now composes with linkifying. Also fixed an early-return so links render even when there are no known member-name mention tokens. NOTE: this is clickable links only, NOT rich preview/unfurl cards. Stream's URL Enrichment is ON server-side, so preview data exists; rendering preview cards in the custom message component is a separate, larger piece best coordinated with the message-grouping restyle (part 2).
+- **v50–v52** — mobile UX overhaul (confirmed on-device across three iterations). v50: thread/replies now open as a full-screen overlay on mobile instead of the side-by-side split that made mobile nearly unusable (CSS `.str-chat__thread{position:fixed;inset:0}` under the `max-width:768px` media query; safe because Stream's Thread renders `null` when closed, so no invisible overlay). Composer made compact on mobile (`minRows` 1 instead of 5, both main and Thread inputs) so the send button stays reachable. Tap-to-reveal message toolbar on touch via `isTouchDevice()` (hover doesn't exist on touch; tapping a bubble toggles the action row). v51: custom `CatsThreadHeader` with a pronounced indigo "Back" button (Stream's default close was too faint to find on mobile AND desktop); passed via `<Thread ThreadHeader={...}>`, which receives `closeThread` as a prop. v52: fixed composer clipping below the screen, root cause was `100vh` including the area behind the mobile browser toolbar; switched mobile to `100dvh` (dynamic viewport height) and made the app edge-to-edge on mobile (no padding/rounded floating panel) so the composer anchors correctly. Added `minHeight:0` to the flex chat column. KEY LESSON: `100vh` is wrong on mobile browsers; use `100dvh` for full-height mobile layouts.
 
 ## Roadmap (not yet built)
 
