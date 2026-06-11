@@ -170,6 +170,10 @@ const AVATAR_COLORS = [
   { value: '#b56b9e', label: 'Mauve' },
 ];
 
+function isTouchDevice() {
+  try { return ('ontouchstart' in window) || (navigator.maxTouchPoints > 0); } catch (e) { return false; }
+}
+
 function getInitials(name) {
   return (name || '').split(' ').filter(Boolean).map(p => p[0]).join('').toUpperCase().slice(0, 2) || '?';
 }
@@ -502,7 +506,7 @@ function CustomMessage() {
   }
 
   return (
-    <div onMouseEnter={() => setHovered(true)} onMouseLeave={() => { setHovered(false); setShowReactionPicker(false); }}
+    <div onMouseEnter={() => { if (!isTouchDevice()) setHovered(true); }} onMouseLeave={() => { if (!isTouchDevice()) { setHovered(false); setShowReactionPicker(false); } }}
       style={{ display: 'flex', flexDirection: mine ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: 8, padding: '3px 16px', marginBottom: 2, position: 'relative' }}>
       <div style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => setShowProfile(true)}>
         <Avatar name={name} color={color} size={32} />
@@ -522,7 +526,8 @@ function CustomMessage() {
             </div>
           </div>
         ) : (
-          <div style={{ background: mine ? '#eef1fd' : '#f4f5f8', borderRadius: mine ? '14px 4px 14px 14px' : '4px 14px 14px 14px', padding: '10px 14px', fontSize: 14, color: '#383d4b', lineHeight: 1.6, wordBreak: 'break-word', fontFamily: "'DM Sans', sans-serif" }}>
+          <div onClick={() => { if (isTouchDevice()) setHovered(h => !h); }}
+            style={{ background: mine ? '#eef1fd' : '#f4f5f8', borderRadius: mine ? '14px 4px 14px 14px' : '4px 14px 14px 14px', padding: '10px 14px', fontSize: 14, color: '#383d4b', lineHeight: 1.6, wordBreak: 'break-word', fontFamily: "'DM Sans', sans-serif", cursor: isTouchDevice() ? 'pointer' : 'default' }}>
             {renderTextWithMentions(message.text)}
             {message.message_text_updated && <span style={{ fontSize: 10, color: '#aaa', marginLeft: 6 }}>(edited)</span>}
           </div>
@@ -1310,6 +1315,11 @@ function App() {
         @media (max-width: 768px){
           .str-chat__channel-header{padding-left:62px!important}
           .cats-wiki{padding-top:64px!important}
+          /* On mobile, a thread takes over the full screen instead of splitting it */
+          .str-chat__thread{position:fixed!important;inset:0!important;width:100vw!important;max-width:100vw!important;height:100%!important;z-index:1200!important;background:#fff!important;margin:0!important;border-radius:0!important;box-shadow:none!important}
+          .str-chat__thread .str-chat__thread-header{padding:16px!important;border-bottom:1px solid #eef0f5!important}
+          /* Make sure the main message list isn't hidden behind anything when no thread is open */
+          .str-chat__main-panel{width:100%!important}
         }
       `}</style>
       <Sidebar groups={CHANNEL_GROUPS} activeId={activeId} onSelect={handleChannelSelect} currentUser={currentUser} chatClient={chatClient} activeChannel={activeChannel} onEditProfile={() => setShowProfileForm(true)} unreadCounts={unreadCounts} mentionCounts={mentionCounts} isMobile={isMobile} mobileNavOpen={mobileNavOpen} onCloseMobileNav={() => setMobileNavOpen(false)} />
@@ -1355,7 +1365,7 @@ function App() {
                       }
                     }} />
                     <div style={{ flex: 1 }}>
-                      <MessageInput grow={true} minRows={5} maxRows={12} />
+                      <MessageInput grow={true} minRows={isMobile ? 1 : 5} maxRows={isMobile ? 6 : 12} />
                     </div>
                     <button title="Send" onClick={() => {
                       const ta = document.querySelector('.str-chat__message-textarea-react-host textarea, .str-chat__message-textarea');
@@ -1382,7 +1392,7 @@ function App() {
                   )}
                 </div>
               </Window>
-              <Thread additionalMessageInputProps={{ grow: true, minRows: 5, maxRows: 12 }} />
+              <Thread additionalMessageInputProps={{ grow: true, minRows: isMobile ? 1 : 5, maxRows: isMobile ? 6 : 12 }} />
             </Channel>
           </Chat>
         )}
