@@ -708,7 +708,7 @@ function Sidebar({ groups, activeId, onSelect, currentUser, chatClient, activeCh
 
   const baseStyle = { width: 264, minWidth: 264, background: 'linear-gradient(180deg,#f8f9fc 0%, #f4f6fa 100%)', borderRight: '1px solid #eef0f5', display: 'flex', flexDirection: 'column', fontFamily: "'DM Sans', sans-serif", overflowY: 'auto', WebkitOverflowScrolling: 'touch' };
   const mobileStyle = isMobile ? {
-    position: 'fixed', top: 0, left: 0, height: '100vh', maxHeight: '100vh', zIndex: 1100,
+    position: 'fixed', top: 0, left: 0, height: '100dvh', maxHeight: '100dvh', zIndex: 1100,
     transform: mobileNavOpen ? 'translateX(0)' : 'translateX(-100%)',
     transition: 'transform 0.25s ease', boxShadow: mobileNavOpen ? '2px 0 24px rgba(0,0,0,0.18)' : 'none',
     overflowY: 'auto', WebkitOverflowScrolling: 'touch',
@@ -1042,6 +1042,29 @@ function storeProfile(p) {
   try { localStorage.setItem('cats_profile', JSON.stringify(p)); } catch {}
 }
 
+// Custom thread header with a clear, pronounced close control (Stream's default
+// close button is faint and hard to find, on mobile and desktop). closeThread is
+// passed in by Stream's Thread component.
+function CatsThreadHeader({ closeThread, thread }) {
+  const parentText = (thread && thread.text) ? thread.text : '';
+  const preview = parentText.length > 48 ? parentText.slice(0, 48) + '…' : parentText;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid #eef0f5', background: '#fff', fontFamily: "'DM Sans', sans-serif" }}>
+      <button onClick={(e) => { if (closeThread) closeThread(e); }} title="Close thread"
+        style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#f1f4fe', color: '#3a55d9', border: '1px solid #d9e1fb', cursor: 'pointer', fontSize: 13, fontWeight: 600, padding: '7px 12px 7px 9px', borderRadius: 9, fontFamily: "'DM Sans', sans-serif", flexShrink: 0, boxShadow: '0 1px 2px rgba(58,85,217,0.08)' }}
+        onMouseEnter={e => { e.currentTarget.style.background = '#e6ecfd'; }}
+        onMouseLeave={e => { e.currentTarget.style.background = '#f1f4fe'; }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>
+        Back
+      </button>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: '#181b26' }}>Thread</div>
+        {preview && <div style={{ fontSize: 11.5, color: '#969cac', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{preview}</div>}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [chatClient, setChatClient] = useState(null);
   const [channelMap, setChannelMap] = useState({});
@@ -1275,9 +1298,9 @@ function App() {
   const activeChannel = channelMap[activeId];
 
   return (
-    <div style={{ display: 'flex', height: '100vh', fontFamily: "'DM Sans', sans-serif", background: 'radial-gradient(1200px 600px at 80% -10%, #eef1f8 0%, rgba(238,241,248,0) 60%), #e7e9f1', padding: 14, overflow: 'hidden' }}>
+    <div style={{ display: 'flex', height: isMobile ? '100dvh' : '100vh', minHeight: isMobile ? '100dvh' : undefined, fontFamily: "'DM Sans', sans-serif", background: 'radial-gradient(1200px 600px at 80% -10%, #eef1f8 0%, rgba(238,241,248,0) 60%), #e7e9f1', padding: isMobile ? 0 : 14, overflow: 'hidden' }}>
       {showWelcome && <WelcomeCard name={currentUser?.name} onOpenGuide={() => dismissWelcome(true)} onDismiss={() => dismissWelcome(false)} />}
-      <div style={{ display: 'flex', flex: 1, background: '#fff', borderRadius: 18, boxShadow: '0 24px 60px rgba(24,27,38,0.14)', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.6)' }}>
+      <div style={{ display: 'flex', flex: 1, background: '#fff', borderRadius: isMobile ? 0 : 18, boxShadow: isMobile ? 'none' : '0 24px 60px rgba(24,27,38,0.14)', overflow: 'hidden', border: isMobile ? 'none' : '1px solid rgba(255,255,255,0.6)', minHeight: 0 }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap');
         :root{
@@ -1323,7 +1346,7 @@ function App() {
         }
       `}</style>
       <Sidebar groups={CHANNEL_GROUPS} activeId={activeId} onSelect={handleChannelSelect} currentUser={currentUser} chatClient={chatClient} activeChannel={activeChannel} onEditProfile={() => setShowProfileForm(true)} unreadCounts={unreadCounts} mentionCounts={mentionCounts} isMobile={isMobile} mobileNavOpen={mobileNavOpen} onCloseMobileNav={() => setMobileNavOpen(false)} />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', minHeight: 0, minWidth: 0 }}>
         {isMobile && !mobileNavOpen && (
           <button onClick={() => setMobileNavOpen(true)} title="Open menu"
             style={{ position: 'absolute', top: 12, left: 12, zIndex: 70, background: '#fff', border: '1px solid #e8e8e8', borderRadius: 8, width: 38, height: 38, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, cursor: 'pointer', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
@@ -1392,7 +1415,7 @@ function App() {
                   )}
                 </div>
               </Window>
-              <Thread additionalMessageInputProps={{ grow: true, minRows: isMobile ? 1 : 5, maxRows: isMobile ? 6 : 12 }} />
+              <Thread ThreadHeader={CatsThreadHeader} additionalMessageInputProps={{ grow: true, minRows: isMobile ? 1 : 5, maxRows: isMobile ? 6 : 12 }} />
             </Channel>
           </Chat>
         )}
