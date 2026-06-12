@@ -1262,16 +1262,22 @@ function App() {
   }
 
   async function ensureChannel(id) {
-    if (channelMap[id]) return channelMap[id];
     const chDef = ALL_CHANNELS.find(c => c.id === id);
-    if (!chDef || !clientRef.current) return null;
-    const channel = clientRef.current.channel('messaging', chDef.id, { name: chDef.name, members: [currentUser.id] });
-    await channel.watch({ presence: true });
-    setChannelMap(prev => ({ ...prev, [id]: channel }));
+    if (!chDef || !clientRef.current) return channelMap[id] || null;
+    let channel = channelMap[id];
+    if (!channel) {
+      channel = clientRef.current.channel('messaging', chDef.id, { name: chDef.name, members: [currentUser.id] });
+      setChannelMap(prev => ({ ...prev, [id]: channel }));
+    }
+    // Always ensure the channel we're opening is actively WATCHED (so live messages,
+    // including your own, appear in real time). Channels loaded at login via queryChannels
+    // are NOT watched, so opening one must watch it now.
+    try { await channel.watch({ presence: true }); } catch (e) {}
     return channel;
   }
 
   async function handleChannelSelect(id) {
+    const prevId = activeIdRef.current;
     setActiveId(id);
     setMobileNavOpen(false);
     setUnreadCounts(prev => ({ ...prev, [id]: 0 }));
@@ -1280,6 +1286,14 @@ function App() {
     const ch = await ensureChannel(id);
     // Persist the read state to Stream so the cleared badge sticks across sessions/devices.
     if (ch) { try { await ch.markRead(); } catch (e) {} }
+    // Stop watching the previously-active channel, so only the active channel is watched.
+    // (Watching a channel makes Stream auto-advance read state on message arrival, which
+    // would wipe unread mentions there. Keeping only the active channel watched preserves
+    // unread/mention persistence everywhere else.)
+    if (prevId && prevId !== id && !STATIC_CHANNELS.includes(prevId)) {
+      const prevCh = channelMap[prevId];
+      if (prevCh && prevCh.stopWatching) { try { await prevCh.stopWatching(); } catch (e) {} }
+    }
   }
 
   useEffect(() => {
