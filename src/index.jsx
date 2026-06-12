@@ -1149,6 +1149,9 @@ function App() {
         try {
           const ch = client.channel('messaging', chDef.id, { name: chDef.name, members: [profile.id] });
           await ch.watch(chDef.id === initialChDef.id ? { presence: true } : undefined);
+          // DIAG: immediately after watch, log this channel's read state
+          const rs = ch.state && ch.state.read ? ch.state.read[profile.id] : undefined;
+          console.log('[CATS DIAG watch]', chDef.id, '| right-after-watch unread_messages:', rs ? rs.unread_messages : 'no-entry', '| countUnreadMentions:', ch.countUnreadMentions());
           map[chDef.id] = ch;
         } catch (e) {
           // if one channel fails to watch, keep going with the rest
