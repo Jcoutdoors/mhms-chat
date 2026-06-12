@@ -1137,39 +1137,55 @@ function App() {
       clientRef.current = client;
       await client.connectUser({ id: profile.id, name: profile.name, color: profile.color, bio: profile.bio || '', link: profile.link || '', instructor: !!profile.instructor }, data.token);
 
-      // DIAG: instrument the Channel prototype markRead to catch EVERY caller.
-      try {
-        const proto = Object.getPrototypeOf(client.channel('messaging', 'cats-general'));
-        if (proto && proto.markRead && !proto.__diagWrapped) {
-          const orig = proto.markRead;
-          proto.markRead = function (...args) {
-            console.log('%c[CATS DIAG markRead CALLED]', 'color:#e07a5f;font-weight:bold', 'channel:', this.id, '| stack:', new Error().stack);
-            return orig.apply(this, args);
-          };
-          proto.__diagWrapped = true;
-        }
-      } catch (e) { console.log('[CATS DIAG] could not wrap markRead:', e && e.message); }
-
       const initialId = getInitialChannelId();
       const initialChDef = ALL_CHANNELS.find(c => c.id === initialId) || ALL_CHANNELS.find(c => c.id === 'cats-general');
 
-      // Watch ALL cohort channels on login (not just the active one), so message.new
-      // fires for every channel and unread/mention badges populate even for channels
-      // the user has not opened yet this session. Cohort is small, so watching ~15
-      // channels at connect is cheap. The active channel is watched with presence.
+      // OPTION A architecture (persistent unread/mention fix):
+      // Watching a channel makes you a "present watcher", and Stream's server then
+      // auto-advances your read pointer when a message arrives there, which wipes unread
+      // mentions. So we DON'T watch every channel. Instead:
+      //   1. queryChannels with watch:false loads all channels' state + read data and
+      //      establishes membership, WITHOUT making us a present watcher (so unread
+      //      mentions persist across sessions).
+      //   2. We watch ONLY the active channel (read-on-receipt there is correct, you're
+      //      viewing it).
+      //   3. Live badges/sounds for non-active channels come from notification.message_new
+      //      (fires for member channels you are not watching).
+      const allIds = ALL_CHANNELS.map(c => c.id);
       const map = {};
-      await Promise.all(ALL_CHANNELS.map(async (chDef) => {
-        try {
-          const ch = client.channel('messaging', chDef.id, { name: chDef.name, members: [profile.id] });
-          await ch.watch(chDef.id === initialChDef.id ? { presence: true } : undefined);
-          // DIAG: immediately after watch, log this channel's read state
-          const rs = ch.state && ch.state.read ? ch.state.read[profile.id] : undefined;
-          console.log('[CATS DIAG watch]', chDef.id, '| right-after-watch unread_messages:', rs ? rs.unread_messages : 'no-entry', '| countUnreadMentions:', ch.countUnreadMentions());
+      try {
+        const queried = await client.queryChannels(
+          { type: 'messaging', id: { $in: allIds } },
+          { last_message_at: -1 },
+          { watch: false, state: true, presence: false, limit: 30 }
+        );
+        queried.forEach(ch => { map[ch.id] = ch; });
+      } catch (e) {
+        // fall through; we'll at least set up the active channel below
+      }
+
+      // Ensure every cohort channel exists in the map AND the user is a member (membership
+      // is what makes notification.message_new fire for channels they aren't watching).
+      for (const chDef of ALL_CHANNELS) {
+        let ch = map[chDef.id];
+        if (!ch) {
+          ch = client.channel('messaging', chDef.id, { name: chDef.name, members: [profile.id] });
           map[chDef.id] = ch;
-        } catch (e) {
-          // if one channel fails to watch, keep going with the rest
         }
-      }));
+        // Add self as member if not already one (no-op if already a member).
+        const isMember = ch.state && ch.state.members && ch.state.members[profile.id];
+        if (!isMember) {
+          try { await ch.addMembers([profile.id]); } catch (e) {}
+        }
+      }
+
+      // Watch ONLY the active channel (live message.new + presence for who's-online there).
+      try {
+        const activeCh = map[initialChDef.id] || client.channel('messaging', initialChDef.id, { name: initialChDef.name, members: [profile.id] });
+        await activeCh.watch({ presence: true });
+        map[initialChDef.id] = activeCh;
+      } catch (e) {}
+
       setChatClient(client);
       setChannelMap(map);
       setActiveId(initialChDef.id);
@@ -1180,31 +1196,18 @@ function App() {
       try {
         const seededUnread = {};
         const seededMentions = {};
-        const myUserId = profile.id;
-        console.log('%c[CATS DIAG] ===== Badge seeding on login =====', 'color:#3a55d9;font-weight:bold');
-        console.log('[CATS DIAG] my user id:', myUserId);
         ALL_CHANNELS.forEach((chDef) => {
           const ch = map[chDef.id];
-          if (!ch) { console.log('[CATS DIAG]', chDef.id, '-> NOT WATCHED'); return; }
+          if (!ch) return;
           const u = ch.countUnread();
           const m = ch.countUnreadMentions();
-          // Inspect the raw read state for my user
-          const readState = ch.state && ch.state.read ? ch.state.read[myUserId] : undefined;
-          const lastMsg = ch.state && ch.state.latestMessages && ch.state.latestMessages.length
-            ? ch.state.latestMessages[ch.state.latestMessages.length - 1] : null;
-          const lastMsgMentions = lastMsg && lastMsg.mentioned_users ? lastMsg.mentioned_users.map(x => x.id) : [];
-          if (u > 0 || m > 0 || readState) {
-            console.log('[CATS DIAG]', chDef.id, '| countUnread:', u, '| countUnreadMentions:', m,
-              '| read.unread_messages:', readState ? readState.unread_messages : 'no-read-entry',
-              '| read.last_read:', readState ? readState.last_read : 'n/a',
-              '| lastMsg mentioned_users:', JSON.stringify(lastMsgMentions));
+          if (u > 0 || m > 0) {
+            console.log('[CATS DIAG seed]', chDef.id, '| unread:', u, '| mentions:', m);
           }
           if (u > 0) seededUnread[chDef.id] = u;
           if (m > 0) seededMentions[chDef.id] = m;
         });
-        console.log('[CATS DIAG] seededUnread:', JSON.stringify(seededUnread));
-        console.log('[CATS DIAG] seededMentions:', JSON.stringify(seededMentions));
-        console.log('%c[CATS DIAG] ================================', 'color:#3a55d9;font-weight:bold');
+        console.log('[CATS DIAG seed] result -> unread:', JSON.stringify(seededUnread), '| mentions:', JSON.stringify(seededMentions));
         // Don't show a badge on the channel we're landing in; mark it read instead.
         delete seededUnread[initialChDef.id];
         delete seededMentions[initialChDef.id];
@@ -1212,7 +1215,7 @@ function App() {
         setMentionCounts(seededMentions);
         if (map[initialChDef.id]) { try { await map[initialChDef.id].markRead(); } catch (e) {} }
       } catch (e) {
-        console.log('[CATS DIAG] seeding error:', e && e.message);
+        // if read state isn't available, fall back to live-only counting
       }
 
       const detectAndAlert = (event, channelLabelMap) => {
