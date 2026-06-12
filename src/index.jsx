@@ -1137,6 +1137,19 @@ function App() {
       clientRef.current = client;
       await client.connectUser({ id: profile.id, name: profile.name, color: profile.color, bio: profile.bio || '', link: profile.link || '', instructor: !!profile.instructor }, data.token);
 
+      // DIAG: instrument the Channel prototype markRead to catch EVERY caller.
+      try {
+        const proto = Object.getPrototypeOf(client.channel('messaging', 'cats-general'));
+        if (proto && proto.markRead && !proto.__diagWrapped) {
+          const orig = proto.markRead;
+          proto.markRead = function (...args) {
+            console.log('%c[CATS DIAG markRead CALLED]', 'color:#e07a5f;font-weight:bold', 'channel:', this.id, '| stack:', new Error().stack);
+            return orig.apply(this, args);
+          };
+          proto.__diagWrapped = true;
+        }
+      } catch (e) { console.log('[CATS DIAG] could not wrap markRead:', e && e.message); }
+
       const initialId = getInitialChannelId();
       const initialChDef = ALL_CHANNELS.find(c => c.id === initialId) || ALL_CHANNELS.find(c => c.id === 'cats-general');
 
