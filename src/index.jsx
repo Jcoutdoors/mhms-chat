@@ -1164,14 +1164,31 @@ function App() {
       try {
         const seededUnread = {};
         const seededMentions = {};
+        const myUserId = profile.id;
+        console.log('%c[CATS DIAG] ===== Badge seeding on login =====', 'color:#3a55d9;font-weight:bold');
+        console.log('[CATS DIAG] my user id:', myUserId);
         ALL_CHANNELS.forEach((chDef) => {
           const ch = map[chDef.id];
-          if (!ch) return;
+          if (!ch) { console.log('[CATS DIAG]', chDef.id, '-> NOT WATCHED'); return; }
           const u = ch.countUnread();
           const m = ch.countUnreadMentions();
+          // Inspect the raw read state for my user
+          const readState = ch.state && ch.state.read ? ch.state.read[myUserId] : undefined;
+          const lastMsg = ch.state && ch.state.latestMessages && ch.state.latestMessages.length
+            ? ch.state.latestMessages[ch.state.latestMessages.length - 1] : null;
+          const lastMsgMentions = lastMsg && lastMsg.mentioned_users ? lastMsg.mentioned_users.map(x => x.id) : [];
+          if (u > 0 || m > 0 || readState) {
+            console.log('[CATS DIAG]', chDef.id, '| countUnread:', u, '| countUnreadMentions:', m,
+              '| read.unread_messages:', readState ? readState.unread_messages : 'no-read-entry',
+              '| read.last_read:', readState ? readState.last_read : 'n/a',
+              '| lastMsg mentioned_users:', JSON.stringify(lastMsgMentions));
+          }
           if (u > 0) seededUnread[chDef.id] = u;
           if (m > 0) seededMentions[chDef.id] = m;
         });
+        console.log('[CATS DIAG] seededUnread:', JSON.stringify(seededUnread));
+        console.log('[CATS DIAG] seededMentions:', JSON.stringify(seededMentions));
+        console.log('%c[CATS DIAG] ================================', 'color:#3a55d9;font-weight:bold');
         // Don't show a badge on the channel we're landing in; mark it read instead.
         delete seededUnread[initialChDef.id];
         delete seededMentions[initialChDef.id];
@@ -1179,7 +1196,7 @@ function App() {
         setMentionCounts(seededMentions);
         if (map[initialChDef.id]) { try { await map[initialChDef.id].markRead(); } catch (e) {} }
       } catch (e) {
-        // if read state isn't available, fall back to live-only counting
+        console.log('[CATS DIAG] seeding error:', e && e.message);
       }
 
       const detectAndAlert = (event, channelLabelMap) => {
