@@ -2,23 +2,21 @@
 
 This is the operating manual and current state for the custom community chat built for
 the MHMS / CATS cohort program. This lives in the repo and in the project knowledge so
-any new conversation starts with full context. **Current version: v59 live in production.**
+any new conversation starts with full context. **Current version: v61 live in production.**
 
-**IMPORTANT SOURCE/BUILD STATE (read before building):** The repo is fully at v59, source and
-built files both. This was verified by cloning the repo directly. The v60 changes (clickable
-mailto links + two wiki sections) were BUILT in a prior session but never committed to the
-repo and never deployed. Decision (Jonathan): work off v59 as the base and fold the v60
-changes into the next release rather than shipping v60 alone.
-
-What this means for the next session:
-- The v60 source is NOT in the repo. The mailto change and the two wiki sections must be
- re-applied on top of v59 source. They are small and fully described below (see the v60
- entry under "Shipped since the original build"), so nothing is lost, but budget a few
- minutes to rebuild them rather than assuming they carry over.
+**IMPORTANT SOURCE/BUILD STATE (read before building):** The repo is fully at v61, source and
+built files both. v61 absorbed the previously-uncommitted v60 work (clickable mailto links +
+two wiki sections), so that gap is closed; nothing is pending re-application. Two standing
+notes for the next session:
 - The Atlas AI agent is BUILT but ON HOLD and intentionally NOT in the repo. Jonathan wants to
  flesh out Atlas's scope before committing or wiring anything. Do not start Atlas work unless
  he raises it. See the Atlas section for why holding is deliberate (scope growth may require
  real worker/architecture changes, so building more now would be premature).
+- The repo's Worker files were found drifted from production TWICE (token worker CORS in this
+ session's audit, notification worker features likewise). Both are reconciled as of v61, but
+ the rule stands: when Jonathan pastes a Worker's actual deployed source, that is ground
+ truth over the repo copy. Do not assume the committed Worker files match Cloudflare without
+ verifying.
 
 ---
 
@@ -54,7 +52,15 @@ It is LIVE with real students. Treat every change as a production change.
 - URL: `https://mhms-chat-token.jonathan-5ad.workers.dev`
 - Generates HS256 JWT user tokens. Takes `?user_id=`, returns `{ token }`.
 - Env var: `STREAM_SECRET` (Secret).
-- Source: `cloudflare-workers/token-worker.js`
+- CORS: origin allow-list (`ALLOWED_ORIGINS`: the chat subdomain, jcoutdoors.github.io, both
+ squarespace hosts) that echoes the matching origin. An unrecognized origin is not rejected;
+ it silently falls back to the subdomain and still gets a token. That, plus the fact that any
+ request supplying a user_id can mint a token for that user_id, is documented INTENTIONAL
+ architectural debt: acceptable for a paywalled cohort with no sensitive data, do not reuse
+ this pattern for anything requiring real auth, and do not "fix" it casually since the app
+ depends on the current behavior.
+- Source: `cloudflare-workers/token-worker.js` (reconciled to match production in v61; the
+ repo copy previously had a stale wildcard-CORS version).
 
 **Notification Worker (Cloudflare)**
 - Name: `cats-notifications`
@@ -62,7 +68,14 @@ It is LIVE with real students. Treat every change as a production change.
 - Receives Stream `message.new` webhook events, sends email via Resend.
 - Env var: `RESEND_API_KEY` (Secret).
 - From address: `no-reply@notifications.nexgenrva.com` (verified subdomain in Resend).
-- Routing: `@mark` / `@dr. mayfield` / `@dr. mark mayfield` → emails `dr.mark.mayfield@gmail.com`; `@support` / `@help` → emails `jonathan@nexgenrva.com`. (The `@dr. mark mayfield` variant was added in v48.)
+- Routing: `@mark` / `@dr. mayfield` / `@dr. mark mayfield` → emails `dr.mark.mayfield@gmail.com`; `@support` / `@help` → emails `jonathan@nexgenrva.com`. (The `@dr. mark mayfield` variant was added in v48.) As of v61, mention patterns have a negative-lookbehind guard so email addresses in message text (like `jon@support.org` or Mark's own Gmail address) do NOT false-trigger, and a trailing word boundary so `@marketing` does not partially match `@mark`.
+- The email template includes a `CHANNEL_NAMES` friendly-name map (keep in sync with
+ `APP_CONFIG.channelGroups` in the app) and a "Respond in the Chat" button linking to
+ `CHAT_URL`. Both are production features that predate v61 but were missing from the repo
+ copy until the v61 reconciliation.
+- As of v61, `senderName`, `channelName`, and message `text` are HTML-escaped via
+ `escapeHtml()` before insertion into the email template (previously unescaped, an
+ injection path into the recipient inboxes).
 - Stream webhook is configured under Stream Dashboard > Overview > Webhook & Event Configuration, subscribed only to `message.new`.
 - Source: `cloudflare-workers/notification-worker.js`
 
@@ -84,7 +97,7 @@ This is the loop for every change. Follow it exactly.
 1. Edit `src/index.jsx` (the editable source in the repo).
 2. From the project root with dependencies installed: `npx webpack` (builds into `dist/`). Build takes ~40s.
 3. Recreate `dist/index.html` (the wrapper that loads `./chat.bundle.js`). The wrapper is simple and static; its contents are in this doc below.
-4. Webpack emits 5 files that ALL must be uploaded to GitHub together: `index.html`, `chat.bundle.js`, and three numbered chunk files like `387.chunk.js`, `760.chunk.js`, `893.chunk.js`. The chunk numbers/names can change between builds.
+4. Webpack emits 5 files that ALL must be uploaded to GitHub together: `index.html`, `chat.bundle.js`, and three numbered chunk files like `387.chunk.js`, `760.chunk.js`, `893.chunk.js`. The chunk numbers/names can change between builds. (Webpack also emits `.LICENSE.txt` files; those are not part of the 5 deploy files and can be ignored.)
 5. In the `mhms-chat` GitHub repo: delete the old files first, then upload all 5 new files.
 6. Wait ~2 minutes for GitHub Pages to deploy, then hard refresh.
 
@@ -133,14 +146,18 @@ of "fixes that did nothing." The fix was to delete the file and rebuild it clean
 
 Rules to avoid repeating it:
 - Never do large repeated `str_replace` operations that could match many times.
-- After any significant edit, verify: `wc -l src/index.jsx` (should be ~1,550 lines as of v59, not millions) and `du -h dist/chat.bundle.js` (~1.8MB).
+- After any significant edit, verify: `wc -l src/index.jsx` (1,586 lines as of v61; was
+ 1,552 at v59; NOT hundreds of thousands) and `du -h dist/chat.bundle.js` (~1.8MB).
+ A stale "~1,100 lines" figure lived in SETUP.md through v60 and misled a session; the
+ numbers here are the verified ones.
 - A quick brace-balance script that ignores strings/comments is useful. Note: the `ProfileCard` function body `{` and its `return (` always show as 2 false-positive "unclosed" entries because the checker is JSX-blind. A THIRD entry indicates a real bug.
 
 ---
 
 ## Channels (sidebar structure)
 
-Defined in `CHANNEL_GROUPS` in `index.jsx`.
+Defined in `APP_CONFIG.channelGroups` in `index.jsx` (was a standalone `CHANNEL_GROUPS`
+const before v61; folded into APP_CONFIG, same data).
 
 **Start Here**
 - `cats-getting-started`: "📖 Getting Started" - a STATIC wiki page, not a Stream channel. Rendered by the `GettingStartedWiki` component. Listed in `STATIC_CHANNELS`.
@@ -155,10 +172,18 @@ Defined in `CHANNEL_GROUPS` in `index.jsx`.
 - `cats-readings`: "Readings & Resources"
 
 Key constants in code:
-- `ALL_CHANNELS` = all channels EXCEPT those in `STATIC_CHANNELS` (the wiki is not a Stream channel).
+- `APP_CONFIG` (new in v61): a single object near the top of `index.jsx` collecting the
+ clearly CATS-specific settings: `orgName`/`orgSubtitle` (sidebar branding), `apiKey` and
+ `tokenUrl` (Stream client key and token worker URL), `instructorEmails`, `consult`
+ (`.link`/`.time`/`.dates` for the Zoom consultation card and bar), and `channelGroups`.
+ The old standalone consts (`TOKEN_URL`, `API_KEY`, `INSTRUCTOR_EMAILS`, `CONSULT_LINK`,
+ `CONSULT_TIME`, `CONSULT_DATES`, `CHANNEL_GROUPS`) no longer exist; everything reads from
+ `APP_CONFIG`. This is a configuration boundary only, not a module split; the app is still
+ one file by design.
+- `ALL_CHANNELS` = all channels EXCEPT those in `STATIC_CHANNELS` (the wiki is not a Stream channel). Derived from `APP_CONFIG.channelGroups`.
 - `STATIC_CHANNELS = ['cats-getting-started']`
 - `ANNOUNCEMENTS_ID = 'cats-announcements'`, `GETTING_STARTED_ID = 'cats-getting-started'`
-- Instructor gating: `canPostAnnouncements(user)` reads the `instructor` flag set from `INSTRUCTOR_EMAILS` at setup (see Profiles & identity above). This same flag gates who can use `@everyone`. (Earlier versions gated by ID prefix; that was replaced in v35 when IDs became email hashes.)
+- Instructor gating: `canPostAnnouncements(user)` reads the `instructor` flag set from `APP_CONFIG.instructorEmails` at setup (see Profiles & identity above). This same flag gates who can use `@everyone`. (Earlier versions gated by ID prefix; that was replaced in v35 when IDs became email hashes.)
 
 ---
 
@@ -168,10 +193,21 @@ Key constants in code:
  - **Identity is derived from the email.** `emailToUserId(email)` SHA-256 hashes the normalized (trimmed, lowercased) email and takes the first 24 hex chars, prefixed `cats-`. The same email always produces the same Stream user ID, so a person reconnects as the same account on any device. This is what closes the cross-device duplicate-account gap.
  - The email field shows a short line explaining it keeps the account synced across devices. Email is validated (required, basic format check).
  - **Existing pre-email profiles:** on load, if a stored profile has no email, the user is routed into the setup form (name and color pre-filled) to add one once. Adding the email rederives their ID from the email and connects on the stable ID. There was essentially no message history at rollout (one test thread), so old-message authorship was not a concern.
- - **Instructor status is gated by email, not by ID.** `INSTRUCTOR_EMAILS = ['jonathan@nexgenrva.com','dr.mark.mayfield@gmail.com']`. At setup, `isInstructorEmail()` sets an `instructor` boolean on the profile, which is stored, passed to Stream on `connectUser` (so it travels on the user object and on every message's `msg.user`), and read by `canPostAnnouncements(user)`. This replaced the old ID-prefix gating, which broke once IDs became email-hash strings.
+ - **Instructor status is gated by email, not by ID.** `APP_CONFIG.instructorEmails = ['jonathan@nexgenrva.com','dr.mark.mayfield@gmail.com']`. At setup, `isInstructorEmail()` sets an `instructor` boolean on the profile, which is stored, passed to Stream on `connectUser` (so it travels on the user object and on every message's `msg.user`), and read by `canPostAnnouncements(user)`. This replaced the old ID-prefix gating, which broke once IDs became email-hash strings.
  - `canPostAnnouncements(user)` now takes a USER OBJECT (reads `user.instructor`), not an ID string. Call sites: the announcements input gate, the `@everyone` autocomplete option, and the inbound `@everyone` sender check (`canPostAnnouncements(msg.user)`).
 
 **Messaging UI** - white premium UI, DM Sans font, colored initial-avatars. Custom message component: full name above bubble, own messages right/blue, others left/gray. Click name/avatar to open a profile card.
+
+**Avatar images (v61)** - `Avatar` accepts an `image` prop. When present it renders a
+circular `<img>` with `object-fit: cover`; when absent, empty, or when the image fails to
+load, it falls back to colored initials (an `imgFailed` state, reset whenever `image`
+changes), so a broken URL never shows a broken-image icon. `image` is threaded through
+every Avatar call site: ProfileForm preview, ProfileCard, CustomMessage, MembersList,
+MentionAutocomplete, Sidebar footer, and the ChannelSearchPanel result rows (a 7th call
+site found in the v61 audit beyond the originally-listed 6). `profile.image` is also
+included in the `connectUser`/`upsertUser` payloads so a future-populated image reaches
+Stream and flows to every render site. There is NO upload UI or image storage yet; this is
+the rendering plumbing only, which unblocks both a future Atlas avatar and student photos.
 
 **Threads** - hover a message → Reply → opens a thread panel. Shows "N replies" under the original.
 
@@ -187,9 +223,11 @@ Key constants in code:
 
 **Mention alerts** - when mentioned (or `@everyone` from an instructor), the user gets: a red `@` badge on the channel, a browser notification (one-time permission request), and a soft chime (Web Audio). Fired from the client `message.new` / `notification.message_new` listeners. Skips your own messages.
 
-**Email routing (via notification worker)** - `@mark` / `@dr. mayfield` / `@dr. mark mayfield` → Mark's email; `@support` / `@help` → Jonathan's email. Independent of the in-chat alerts.
+**Email routing (via notification worker)** - `@mark` / `@dr. mayfield` / `@dr. mark mayfield` → Mark's email; `@support` / `@help` → Jonathan's email. Independent of the in-chat alerts. As of v61, patterns are guarded against firing from email addresses inside message text.
 
-**Getting Started wiki** - static formatted read-only page. Sections: Channels, Announcements, Posting & replying, Mentions, Reaching the instructor (@mark), Tech help & support (@support/@help), Notifications, Searching messages, Your account (same email = same account on any device), Sharing files, Need help.
+**Clickable links and email addresses in messages** - `linkifyText` detects http(s) URLs, bare `www.` URLs, and bare email addresses in the non-mention text segments and renders them as underlined indigo links. URLs open in a new tab; email addresses become `mailto:` links. Detection runs in a single regex pass so URL and email matches never overlap. Trailing sentence punctuation stays outside URL links. Mention highlighting composes with linkifying, and a known pre-existing interaction is unchanged: an email whose local part matches a member's first name (e.g. `sarah@gmail.com`) is caught by the mention pass first.
+
+**Getting Started wiki** - static formatted read-only page. Sections: Channels, Announcements, Posting & replying, Mentions, Reaching the instructor (@mark), Turning in assignments (email work straight to dr.mark.mayfield@gmail.com, live mailto link, no portal), Tech help & support (@support/@help), Notifications, Searching messages, Links and email addresses (pasted links and addresses go clickable automatically), Your account (same email = same account on any device), Sharing files, Need help. Plus the consult card at the top (see v53/v54).
 
 **Setup form intro note (v37)** - the profile setup form shows an adaptive note at the top during signup. Returning users (stored profile with a name but no email) see a "welcome back, your data is safe, this just links your devices" reassurance. First-timers see a short "here's how this works" intro. Controlled by `showIntro` (signup only) and `isReturning` props on `ProfileForm`.
 
@@ -261,7 +299,38 @@ If reactions, uploads, or user search ever break, re-check these.
 - **v57** - THE FIX (Option A). Replaced watch-all-channels with `client.queryChannels(..., { watch: false, state: true, presence: false })`, which loads every channel's state and read data without making the user a present watcher. Only the active channel is watched. Membership is ensured via `addMembers` so `notification.message_new` still fires for channels the user is not watching.
 - **v58** - fixed the side effect of v57. `ensureChannel` returned early when a channel was already in the map, so opening a channel never watched it, and your own messages did not appear until you refreshed. Now `ensureChannel` always watches the channel being opened, and `handleChannelSelect` calls `stopWatching()` on the previous one. Exactly one channel is watched at any moment.
 - **v59** - clean production build, diagnostics stripped. The missing notification chime turned out to be the browser autoplay policy (audio needs a user gesture first), not a code bug. It resolved itself.
-- **v60** - email addresses in messages are now clickable `mailto:` links (`linkifyText` previously matched only http(s) and `www.`). Wiki gains two sections: "Turning in assignments" (with Dr. Mayfield's address as a live link) and "Links and email addresses" (which also back-documents the v49 clickable links that were never written up).
+- **v60** - built in a prior session but never committed or deployed; fully absorbed into v61. The design: email addresses in messages become clickable `mailto:` links, plus two wiki sections ("Turning in assignments" and "Links and email addresses"). See v61 for what actually shipped.
+- **v61** - Baseline Integrity + Avatar Foundation. Four parts.
+ (1) Worker reconciliation: the repo's committed Worker files had drifted from what's live
+ in Cloudflare, so both were replaced with the confirmed deployed source (Jonathan pasted
+ the real files from Cloudflare this session). Token worker: no logic change; confirmed the
+ v44 origin allow-list is real, added an explicit architectural-debt comment (unrestricted
+ user_id token minting; unrecognized origins silently fall back rather than reject; both
+ intentional). Notification worker: confirmed the `CHANNEL_NAMES` friendly-name map, the
+ "Respond in the Chat" reply button, and the working multi-word Mark regex are real
+ production features (none were in the repo copy or this doc); preserved all three. Fixed
+ two real bugs: mention patterns matched inside email addresses (jon@support.org fired the
+ support route; Mark's own Gmail address, now published in the wiki, would have fired his),
+ solved with a negative-lookbehind guard plus a trailing word boundary; and senderName,
+ channelName, and message text went into the email HTML unescaped, solved with escapeHtml()
+ on all three. Regex verified against a 14-case test matrix. Deployed to Cloudflare
+ alongside the app deploy (the app's new wiki section actively encourages typing Mark's
+ email address into chat, which is exactly what the old regex false-triggered on).
+ (2) Re-applied the v60 work on the v59 base: `linkifyText` now detects bare email
+ addresses and renders them as mailto: links, in the same regex pass as URL detection so
+ matches never overlap; added the "Turning in assignments" wiki section (Mark's address as
+ a live mailto link) and the "Links and email addresses" wiki section.
+ (3) Avatar image rendering: `Avatar` accepts an `image` prop, renders a circular
+ object-fit-cover image with initials fallback on absence OR load failure (no broken-image
+ icon ever), threaded through all seven call sites (the six planned plus ChannelSearchPanel
+ results, found in the audit), and `profile.image` added to connectUser/upsertUser so a
+ future image value reaches Stream. No upload UI, no storage backend, no Atlas wiring.
+ (4) APP_CONFIG: one object collecting org labels, API key, token URL, instructor emails,
+ consult details, and channel groups; all old standalone consts removed and call sites
+ repointed; verified zero stray references by grep. No module split, no broader refactor.
+ Build verified: index.jsx 1,586 lines (v59 baseline was 1,552; delta consistent with the
+ changes, checked clean for corruption), bundle 1.8MB, queryUsers x4 in the bundle. Also
+ corrected the stale "~1,100 lines" figure that had been sitting in SETUP.md.
 
 ## HARD LESSON: never watch all channels (read before touching notifications)
 
@@ -289,6 +358,19 @@ The rule now:
 
 Do not reintroduce watch-all. It looks like a convenience and it is a regression.
 
+## HARD LESSON: repo Worker files can drift from production (found in v61)
+
+Twice in the v61 audit, the committed `cloudflare-workers/` files turned out to be older
+than what was actually running: the token worker's repo copy still had the pre-v44 wildcard
+CORS, and the notification worker's repo copy was missing the channel-name map, the reply
+button, and the multi-word Mark regex fix. Worker changes get deployed by pasting into the
+Cloudflare dashboard, so nothing forces the repo copy to be updated at the same time. The
+rules now:
+- When a Worker changes in Cloudflare, update the repo copy in the same sitting.
+- When a session needs to modify a Worker, verify against the actual deployed source first
+ (ask Jonathan to paste it from Cloudflare). His pasted source is ground truth; the repo
+ copy is a claim.
+
 ## AI support agent: Atlas (built, ON HOLD, not in repo)
 
 A third Cloudflare Worker that answers "how does this work" questions in the chat. It is
@@ -307,12 +389,13 @@ Jonathan or Mark to answer. Both of Jessy's real questions (where do reflection 
 where did the reading excerpts go) are answerable from the knowledge base. The agent answers
 them instantly, and Jonathan still gets the @support email, so a human stays in the loop.
 
-**Files (built last session, held OUTSIDE the repo in session outputs, not committed):**
+**Files (built in an earlier session, held OUTSIDE the repo in session outputs, not committed):**
 - `ai-agent-worker.js` - the agent. Worker name must be `cats-ai-agent` when deployed.
-- `notification-worker.js` - updated copy that adds the fan-out and the bot guard. NOTE: the
- repo's committed `cloudflare-workers/notification-worker.js` is still the OLD one without the
- fan-out. The updated version is held until Atlas is actually deployed.
-These exist only in the prior session's outputs. If scope changes, they get rebuilt to match.
+- An Atlas-enabled `notification-worker.js` - a copy that adds the fan-out and the bot guard.
+ IMPORTANT: that held copy predates the v61 notification worker (it lacks the v61
+ email-address guard and HTML escaping). When Atlas resumes, the fan-out and bot guard must
+ be re-applied ON TOP OF the v61 worker, not by pasting the old held copy over it.
+These exist only in prior session outputs. If scope changes, they get rebuilt to match.
 
 **Architecture.** Stream sends `message.new` to ONE webhook URL, which is the existing
 `cats-notifications` worker. That worker now does its email routing as before, and also
@@ -330,7 +413,8 @@ unsupported on current-generation models and are omitted deliberately.
 2. Never post in Announcements.
 3. Only respond to the trigger `(^|\s)@(assistant|ai|support|help)\b`. The leading
  whitespace requirement matters: without it, an email address like `jon@support.org`
- inside a message triggers the bot.
+ inside a message triggers the bot. (The v61 notification worker now uses the same class
+ of guard for its own email routing.)
 4. Never answer a message directed at @mark.
 
 The notification worker has the matching guard: it ignores `cats-assistant` messages, so
@@ -368,7 +452,8 @@ the worker can never drift.
 submitted via "Course Platform, then Submit". That is wrong in practice. Mark wants everything
 emailed to dr.mark.mayfield@gmail.com. There is no upload portal. The Guide is a document, not
 ground truth. Where the Guide and Mark's actual practice disagree, Mark wins. Check other
-Guide-derived facts before trusting them.
+Guide-derived facts before trusting them. (As of v61 the correct workflow is documented for
+students in the wiki's "Turning in assignments" section.)
 
 **Setup order** (nothing reaches students until step 5):
 0. Run the test bench, judge the refusals.
@@ -376,7 +461,8 @@ Guide-derived facts before trusting them.
 2. Create the `cats-ai-agent` worker, paste the file, Deploy.
 3. Add both secrets, Deploy again.
 4. Hit `/selftest?channel=cats-mod-10`. Both verdict flags must be true.
-5. Update `cats-notifications` with the new worker file. This turns the agent on.
+5. Update `cats-notifications` with the new worker file (rebuilt on the v61 base, see the
+ Files note above). This turns the agent on.
 6. Live-test in Module 10 with the test account.
 
 **Renaming.** `const ASSISTANT_NAME = 'Atlas';` is a one-line change. The name was chosen
@@ -387,32 +473,15 @@ exactly the boundary this agent must hold.
 
 **In flight right now (next session picks this up):**
 
-0. **Next release: re-apply v60 + (optionally) Avatar image rendering, built on v59.**
- Base is the committed v59 source. Two pieces can go into the next release:
-
- a. **Re-apply v60** (small, already designed): the `linkifyText` change so email addresses
- render as clickable `mailto:` links, plus two Getting Started wiki sections ("Turning in
- assignments" with Mark's address as a live link, and "Links and email addresses"). Full
- detail is in the v60 entry under "Shipped since the original build." Rebuild on v59.
-
- b. **Avatar image rendering** (generally useful, independent of Atlas): the `Avatar`
- component only draws colored initials and has ZERO references to `user.image`, so no
- avatar image can ever display. Teaching it to render an `<img>` (rounded, object-fit
- cover, initials fallback, must work at 36px) and threading `image` through every place
- Avatar is used (message list, profile card, members list, autocomplete, sidebar footer)
- unblocks BOTH a future Atlas avatar AND student profile photos. This is worth doing on
- its own merits. It does NOT require Atlas to be resolved.
-
- DECISION on Atlas art (still valid whenever Atlas resumes): ONE image, not per-pose art. All
- per-pose complexity is retired: NO per-message custom field, NO model-chosen pose, NO
- crisis-override pose logic. Jonathan has his own Atlas avatar to upload when that time comes.
- Do NOT wire an Atlas avatar in until Atlas itself is un-parked (see the Atlas section).
-
 1. **Atlas: scope conversation FIRST, then build.** Before any further Atlas code, decide how
  big Atlas becomes (answer-and-forget vs. stateful-with-memory-and-logging). That decision
  determines whether the existing worker just needs prompt edits or a whole new architecture
  (a database). Only after that do we rebuild/commit the Atlas workers and run the setup order
- in the AI agent section.
+ in the AI agent section. Note: the Avatar image-rendering prerequisite for the Atlas avatar
+ is DONE as of v61; when Atlas is un-parked, wiring in Jonathan's single Atlas avatar image
+ is now just a matter of hosting the image and setting the bot user's `image` field. The
+ standing decision holds: ONE image, no per-pose art, no per-message custom field, no
+ model-chosen pose, no crisis-override pose logic.
 
 2. **Welcome-back "here's what you missed" summary.** Deliberately queued behind the Option A
  fix, because it needs accurate persisted unread state, which now exists. Show it only when
@@ -446,8 +515,10 @@ Jonathan wants Skool-style ranks based on engagement. Honest constraints raised 
  fits a clinical training cohort at all.
 
 Parked unless a need appears:
-- **Profile photo uploads** - needs an image backend (e.g. Cloudflare R2), OR is partially
- unblocked once `Avatar` renders images (see item 0) if URLs are hosted in the repo.
+- **Profile photo uploads** - needs an image backend (e.g. Cloudflare R2). Partially
+ unblocked as of v61: `Avatar` now renders images end to end, so photos work today if
+ image URLs are hosted somewhere (e.g. in the repo); what's missing is only the upload
+ path and storage.
 - **Weekly digest email to Mark** - a scheduled (cron) job.
 
 **Fall cohort plan:** move the course behind a free Squarespace membership login. That gives a real logged-in identity the chat can read, which permanently solves identity and retires the email-derived-ID approach (which is the interim solution while the course sits on an unlisted page). When that happens, identity should switch to the Squarespace member identity.
@@ -474,15 +545,19 @@ not go in the wiki.
 ## File inventory in this project package
 
 - `PROJECT_KNOWLEDGE.md`: this document.
-- `src/index.jsx`: the complete current app source (current version is in the version line at the top of this doc). The real working file.
+- `src/index.jsx`: the complete current app source (current version is in the version line at the top of this doc). The real working file. 1,586 lines as of v61.
 - `webpack.config.js`: webpack build config (repo root).
 - `package.json`: dependencies and versions (repo root).
-- `cloudflare-workers/token-worker.js`: the JWT token worker (`mhms-chat-token`).
-- `cloudflare-workers/notification-worker.js`: the email worker (`cats-notifications`), current deployed version.
+- `cloudflare-workers/token-worker.js`: the JWT token worker (`mhms-chat-token`). Matches the deployed source as of the v61 reconciliation.
+- `cloudflare-workers/notification-worker.js`: the email worker (`cats-notifications`). Matches the deployed source as of the v61 reconciliation (deployed source = production baseline + the v61 email-guard and HTML-escaping fixes).
 - (HELD, not in repo) `ai-agent-worker.js` - the Atlas support agent. Built, on hold, lives in
- the prior session's outputs only. Not committed pending the Atlas scope decision.
+ a prior session's outputs only. Not committed pending the Atlas scope decision.
+- (HELD, not in repo) the Atlas-enabled `notification-worker.js` variant - predates v61; must
+ be rebuilt on the v61 worker before use. See the Atlas section.
 - (HELD, not in repo) `cats-assistant-test-bench.jsx` - offline test bench for the agent's
  prompt. Never part of the app.
-- Atlas avatar image: Jonathan has his own, to be uploaded when Atlas is un-parked and after
- `Avatar` is taught to render images. Not in the repo yet. One image, no poses.
-- `SETUP.md`: how to rebuild the environment from scratch and the exact deploy steps.
+- Atlas avatar image: Jonathan has his own, to be uploaded when Atlas is un-parked. The
+ Avatar rendering prerequisite is done (v61). Not in the repo yet. One image, no poses.
+- `SETUP.md`: how to rebuild the environment from scratch and the exact deploy steps. NOTE:
+ update its `wc -l` sanity figure to 1,586 (it said ~1,100, which was stale since well
+ before v59).
