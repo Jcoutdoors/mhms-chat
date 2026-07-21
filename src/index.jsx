@@ -38,17 +38,64 @@ function loadEmojiMart() {
 }
 setTimeout(() => loadEmojiMart().catch(() => {}), 3000);
 
-const TOKEN_URL = 'https://mhms-chat-token.jonathan-5ad.workers.dev';
-const API_KEY = '9bdsdh9s956e';
+// APP_CONFIG collects the CATS-specific settings that would change if this codebase
+// were ever reused for a different cohort/program: org labels, the Stream API key and
+// token worker URL, instructor emails, consultation details, and channel groups. Kept
+// as plain data (not split into separate modules) so it stays easy to scan in one place.
+const APP_CONFIG = {
+  orgName: 'CATS Program',
+  orgSubtitle: 'Cohort Community',
+  apiKey: '9bdsdh9s956e',
+  tokenUrl: 'https://mhms-chat-token.jonathan-5ad.workers.dev',
+  // Instructor accounts are gated by the email they sign in with.
+  // Anyone signing in with one of these emails can post in Announcements and use @everyone.
+  instructorEmails: ['jonathan@nexgenrva.com', 'dr.mark.mayfield@gmail.com'],
+  // Mark hosts a recurring Zoom consult; the join link is fixed across sessions.
+  // Update consult.dates each term and consult.link if it ever changes.
+  consult: {
+    link: 'https://ccu.zoom.us/j/2303075413',
+    time: '6pm MST (7pm CST / 8pm EST / 5pm PST)',
+    dates: ['Jun 10', 'Jun 24', 'Jul 8', 'Jul 22', 'Aug 5', 'Aug 19'],
+  },
+  channelGroups: [
+    {
+      label: 'Start Here',
+      channels: [
+        { id: 'cats-getting-started', name: '📖 Getting Started' },
+        { id: 'cats-announcements', name: '📣 Announcements' },
+      ],
+    },
+    {
+      label: 'Course Modules',
+      channels: [
+        { id: 'cats-mod-01', name: 'Mod 1 · Development & Neuroscience' },
+        { id: 'cats-mod-02', name: 'Mod 2 · Attachment Theory' },
+        { id: 'cats-mod-03', name: 'Mod 3 · Trauma, ACEs & PTSD' },
+        { id: 'cats-mod-04', name: 'Mod 4 · Therapeutic Presence' },
+        { id: 'cats-mod-05', name: 'Mod 5 · CBT, DBT & ACT' },
+        { id: 'cats-mod-06', name: 'Mod 6 · TF-CBT, EMDR & MI' },
+        { id: 'cats-mod-07', name: 'Mod 7 · Crisis Intervention' },
+        { id: 'cats-mod-08', name: 'Mod 8 · Family Systems' },
+        { id: 'cats-mod-09', name: 'Mod 9 · Identity, Culture & Tech' },
+        { id: 'cats-mod-10', name: 'Mod 10 · Supervised Practice' },
+      ],
+    },
+    {
+      label: 'Community',
+      channels: [
+        { id: 'cats-general', name: 'General' },
+        { id: 'cats-weekly-wins', name: 'Weekly Wins' },
+        { id: 'cats-readings', name: 'Readings & Resources' },
+      ],
+    },
+  ],
+};
 
-// Instructor accounts are gated by the email they sign in with.
-// Anyone signing in with one of these emails can post in Announcements and use @everyone.
-const INSTRUCTOR_EMAILS = ['jonathan@nexgenrva.com', 'dr.mark.mayfield@gmail.com'];
 function normalizeEmail(email) {
   return (email || '').trim().toLowerCase();
 }
 function isInstructorEmail(email) {
-  return INSTRUCTOR_EMAILS.includes(normalizeEmail(email));
+  return APP_CONFIG.instructorEmails.includes(normalizeEmail(email));
 }
 
 // Turn an email into a stable, deterministic Stream user ID. The same email always
@@ -73,11 +120,6 @@ function canPostAnnouncements(user) {
 const ANNOUNCEMENTS_ID = 'cats-announcements';
 const GETTING_STARTED_ID = 'cats-getting-started';
 
-// Live consultation details. Mark hosts a recurring Zoom consult; the join link is
-// fixed across sessions. Update CONSULT_DATES each term and CONSULT_LINK if it ever changes.
-const CONSULT_LINK = 'https://ccu.zoom.us/j/2303075413';
-const CONSULT_TIME = '6pm MST (7pm CST / 8pm EST / 5pm PST)';
-const CONSULT_DATES = ['Jun 10', 'Jun 24', 'Jul 8', 'Jul 22', 'Aug 5', 'Aug 19'];
 // Static channels render as a wiki page, not a Stream chat feed.
 const STATIC_CHANNELS = [GETTING_STARTED_ID];
 
@@ -85,40 +127,7 @@ const STATIC_CHANNELS = [GETTING_STARTED_ID];
 // Used to highlight @mentions in rendered messages.
 const memberNameRegistry = { names: [] };
 
-const CHANNEL_GROUPS = [
-  {
-    label: 'Start Here',
-    channels: [
-      { id: 'cats-getting-started', name: '📖 Getting Started' },
-      { id: 'cats-announcements', name: '📣 Announcements' },
-    ],
-  },
-  {
-    label: 'Course Modules',
-    channels: [
-      { id: 'cats-mod-01', name: 'Mod 1 · Development & Neuroscience' },
-      { id: 'cats-mod-02', name: 'Mod 2 · Attachment Theory' },
-      { id: 'cats-mod-03', name: 'Mod 3 · Trauma, ACEs & PTSD' },
-      { id: 'cats-mod-04', name: 'Mod 4 · Therapeutic Presence' },
-      { id: 'cats-mod-05', name: 'Mod 5 · CBT, DBT & ACT' },
-      { id: 'cats-mod-06', name: 'Mod 6 · TF-CBT, EMDR & MI' },
-      { id: 'cats-mod-07', name: 'Mod 7 · Crisis Intervention' },
-      { id: 'cats-mod-08', name: 'Mod 8 · Family Systems' },
-      { id: 'cats-mod-09', name: 'Mod 9 · Identity, Culture & Tech' },
-      { id: 'cats-mod-10', name: 'Mod 10 · Supervised Practice' },
-    ],
-  },
-  {
-    label: 'Community',
-    channels: [
-      { id: 'cats-general', name: 'General' },
-      { id: 'cats-weekly-wins', name: 'Weekly Wins' },
-      { id: 'cats-readings', name: 'Readings & Resources' },
-    ],
-  },
-];
-
-const ALL_CHANNELS = CHANNEL_GROUPS.flatMap(g => g.channels).filter(c => !STATIC_CHANNELS.includes(c.id));
+const ALL_CHANNELS = APP_CONFIG.channelGroups.flatMap(g => g.channels).filter(c => !STATIC_CHANNELS.includes(c.id));
 
 // Ask for browser notification permission once.
 function requestNotificationPermission() {
@@ -184,16 +193,26 @@ function getInitials(name) {
   return (name || '').split(' ').filter(Boolean).map(p => p[0]).join('').toUpperCase().slice(0, 2) || '?';
 }
 
-function Avatar({ name, color, size = 32 }) {
+// Renders a circular avatar image when `image` is present and loads successfully.
+// Falls back to colored initials when `image` is absent, empty, or fails to load
+// (no broken-image icon is ever shown; a load failure just re-renders the initials).
+function Avatar({ name, color, size = 32, image }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  useEffect(() => { setImgFailed(false); }, [image]);
+  const showImage = !!image && !imgFailed;
   return (
     <div style={{
       width: size, height: size, borderRadius: '50%',
-      background: color || '#3b73d8', color: '#fff',
+      background: showImage ? '#e7e9f0' : (color || '#3b73d8'), color: '#fff',
       fontSize: size * 0.38, fontWeight: 600,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       flexShrink: 0, userSelect: 'none', fontFamily: "'DM Sans', sans-serif",
+      overflow: 'hidden',
     }}>
-      {getInitials(name)}
+      {showImage
+        ? <img src={image} alt="" onError={() => setImgFailed(true)}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+        : getInitials(name)}
     </div>
   );
 }
@@ -238,7 +257,7 @@ function ProfileForm({ initial = {}, onSave, title, subtitle, showIntro = false,
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, fontFamily: "'DM Sans', sans-serif" }}>
       <div style={{ background: '#fff', borderRadius: 16, padding: '32px 32px 28px', width: 420, maxWidth: '95vw', boxShadow: '0 20px 60px rgba(0,0,0,0.15)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 24 }}>
-          <Avatar name={fullName || '?'} color={color} size={48} />
+          <Avatar name={fullName || '?'} color={color} size={48} image={initial.image} />
           <div>
             <div style={{ fontSize: 17, fontWeight: 600, color: '#1a1a1a' }}>{title}</div>
             <div style={{ fontSize: 13, color: '#999', marginTop: 2 }}>{subtitle}</div>
@@ -329,7 +348,7 @@ function ProfileCard({ user, onClose }) {
       <div style={{ background: '#fff', borderRadius: 14, padding: '28px 28px 24px', width: 320, boxShadow: '0 16px 48px rgba(0,0,0,0.14)', position: 'relative' }} onClick={e => e.stopPropagation()}>
         <button onClick={onClose} style={{ position: 'absolute', top: 14, right: 14, background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: '#aaa', lineHeight: 1 }}>×</button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-          <Avatar name={name} color={color} size={52} />
+          <Avatar name={name} color={color} size={52} image={user.image} />
           <div style={{ fontSize: 16, fontWeight: 600, color: '#1a1a1a' }}>{name}</div>
         </div>
         {user.bio && <div style={{ fontSize: 13, color: '#555', lineHeight: 1.6, marginBottom: 12 }}>{user.bio}</div>}
@@ -404,27 +423,34 @@ function EmojiButton({ onEmojiSelect }) {
 
 // Render message text with @mentions highlighted.
 // Turn a plain string into an array of text and clickable link elements.
-// Detects http(s):// URLs and bare www. URLs, and renders them as links that
-// open in a new tab. Used on the non-mention text segments below.
+// Detects http(s):// URLs, bare www. URLs, and bare email addresses, and renders them
+// as links (email addresses become mailto: links). Used on the non-mention text
+// segments below. Note: an email address whose local part matches a known member's
+// first name (e.g. "sarah@gmail.com") is caught by the @mention pass first, same as
+// before this change; that pre-existing interaction is unaffected.
 function linkifyText(str, keyStart) {
   if (!str) return [str];
-  // Match http(s) URLs or bare www. URLs. Trailing punctuation is trimmed below.
-  const urlRe = /((?:https?:\/\/|www\.)[^\s]+)/gi;
+  // Match http(s) URLs, bare www. URLs, or bare email addresses in a single pass so
+  // matches never overlap. Trailing sentence punctuation is trimmed for URLs only.
+  const linkRe = /((?:https?:\/\/|www\.)[^\s]+)|([a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+)/gi;
   const out = [];
   let last = 0; let m; let key = keyStart;
-  while ((m = urlRe.exec(str)) !== null) {
-    let url = m[0];
-    // Don't swallow trailing sentence punctuation that is unlikely to be part of the URL.
+  while ((m = linkRe.exec(str)) !== null) {
+    const isUrl = !!m[1];
+    let matched = m[0];
     let trail = '';
-    const trailMatch = url.match(/[.,;:!?)\]}'"]+$/);
-    if (trailMatch) { trail = trailMatch[0]; url = url.slice(0, url.length - trail.length); }
+    if (isUrl) {
+      // Don't swallow trailing sentence punctuation that is unlikely to be part of the URL.
+      const trailMatch = matched.match(/[.,;:!?)\]}'"]+$/);
+      if (trailMatch) { trail = trailMatch[0]; matched = matched.slice(0, matched.length - trail.length); }
+    }
     if (m.index > last) out.push(str.slice(last, m.index));
-    const href = url.startsWith('http') ? url : 'https://' + url;
+    const href = isUrl ? (matched.startsWith('http') ? matched : 'https://' + matched) : 'mailto:' + matched;
     out.push(
-      <a key={'lnk' + (key++)} href={href} target="_blank" rel="noopener noreferrer"
+      <a key={'lnk' + (key++)} href={href} target={isUrl ? '_blank' : undefined} rel={isUrl ? 'noopener noreferrer' : undefined}
         style={{ color: '#3a55d9', textDecoration: 'underline', wordBreak: 'break-word' }}
         onClick={e => e.stopPropagation()}>
-        {url}
+        {matched}
       </a>
     );
     if (trail) out.push(trail);
@@ -515,7 +541,7 @@ function CustomMessage() {
     <div onMouseEnter={() => { if (!isTouchDevice()) setHovered(true); }} onMouseLeave={() => { if (!isTouchDevice()) { setHovered(false); setShowReactionPicker(false); } }}
       style={{ display: 'flex', flexDirection: mine ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: 8, padding: '3px 16px', marginBottom: 2, position: 'relative' }}>
       <div style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => setShowProfile(true)}>
-        <Avatar name={name} color={color} size={32} />
+        <Avatar name={name} color={color} size={32} image={user.image} />
       </div>
       <div style={{ maxWidth: '68%', display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start' }}>
         <div style={{ fontSize: 11, fontWeight: 600, color: '#888', marginBottom: 3, cursor: 'pointer' }} onClick={() => setShowProfile(true)}>
@@ -693,7 +719,7 @@ function MembersList({ chatClient, activeChannel, currentUserId }) {
         return (
           <div key={user.id} onClick={() => setProfileUser(user)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', borderRadius: 6, cursor: 'pointer' }} onMouseEnter={e => e.currentTarget.style.background = '#efefef'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
             <div style={{ position: 'relative', flexShrink: 0 }}>
-              <Avatar name={name} color={color} size={24} />
+              <Avatar name={name} color={color} size={24} image={user.image} />
               <div style={{ position: 'absolute', bottom: -1, right: -1, width: 8, height: 8, borderRadius: '50%', background: isOnline ? '#22c55e' : '#d1d5db', border: '1.5px solid #f9f9f9', transition: 'background 0.3s' }} />
             </div>
             <span style={{ fontSize: 12, color: isOnline ? '#1a1a1a' : '#999', fontWeight: isOnline ? 500 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -733,8 +759,8 @@ function Sidebar({ groups, activeId, onSelect, currentUser, chatClient, activeCh
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ width: 30, height: 30, borderRadius: 9, background: 'linear-gradient(135deg,#3a55d9,#2f44b8)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 14, boxShadow: '0 4px 12px rgba(58,85,217,0.35)', fontFamily: "'Fraunces', serif", flexShrink: 0 }}>C</div>
           <div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#181b26', letterSpacing: '0.01em' }}>CATS Program</div>
-            <div style={{ fontSize: 11.5, color: '#969cac', marginTop: 1 }}>Cohort Community</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#181b26', letterSpacing: '0.01em' }}>{APP_CONFIG.orgName}</div>
+            <div style={{ fontSize: 11.5, color: '#969cac', marginTop: 1 }}>{APP_CONFIG.orgSubtitle}</div>
           </div>
         </div>
       </div>
@@ -767,7 +793,7 @@ function Sidebar({ groups, activeId, onSelect, currentUser, chatClient, activeCh
       <div style={{ padding: '10px 14px', borderTop: '1px solid #eef0f5', flexShrink: 0 }}>
         <button onClick={onEditProfile} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '4px', borderRadius: 8, transition: 'background 0.15s' }} onMouseEnter={e => e.currentTarget.style.background = '#efefef'} onMouseLeave={e => e.currentTarget.style.background = 'none'} title="Edit your profile">
           <div style={{ position: 'relative' }}>
-            <Avatar name={name} color={color} size={28} />
+            <Avatar name={name} color={color} size={28} image={currentUser?.image} />
             <div style={{ position: 'absolute', bottom: -1, right: -1, width: 8, height: 8, borderRadius: '50%', background: '#22c55e', border: '1.5px solid #f9f9f9' }} />
           </div>
           <span style={{ fontSize: 12, fontWeight: 500, color: '#333', flex: 1, textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
@@ -879,7 +905,7 @@ function MentionAutocomplete({ members, canMentionEveryone }) {
           {opt.everyone ? (
             <div style={{ width: 24, height: 24, borderRadius: '50%', background: '#e03e3e', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700 }}>@</div>
           ) : (
-            <Avatar name={opt.name} color={opt.color} size={24} />
+            <Avatar name={opt.name} color={opt.color} size={24} image={opt.image} />
           )}
           <span style={{ fontSize: 13, color: '#1a1a1a', fontWeight: opt.everyone ? 600 : 400 }}>
             {opt.everyone ? 'everyone' : opt.name}
@@ -914,14 +940,14 @@ function GettingStartedWiki() {
             <span style={{ fontSize: 17, fontWeight: 700, letterSpacing: '0.01em' }}>Live Consultations with Dr. Mayfield</span>
           </div>
           <p style={{ fontSize: 13.5, lineHeight: 1.6, color: 'rgba(255,255,255,0.92)', marginBottom: 14 }}>
-            Mark hosts a live Zoom consultation every other week at <strong>{CONSULT_TIME}</strong>. Same link every time, so you can join right from here.
+            Mark hosts a live Zoom consultation every other week at <strong>{APP_CONFIG.consult.time}</strong>. Same link every time, so you can join right from here.
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginBottom: 18 }}>
-            {CONSULT_DATES.map(d => (
+            {APP_CONFIG.consult.dates.map(d => (
               <span key={d} style={{ fontSize: 12, fontWeight: 600, background: 'rgba(255,255,255,0.16)', color: '#fff', padding: '4px 10px', borderRadius: 20 }}>{d}</span>
             ))}
           </div>
-          <a href={CONSULT_LINK} target="_blank" rel="noopener noreferrer"
+          <a href={APP_CONFIG.consult.link} target="_blank" rel="noopener noreferrer"
             style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#fff', color: '#2f44b8', fontSize: 14, fontWeight: 700, padding: '11px 20px', borderRadius: 10, textDecoration: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.16)' }}>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
             Join our consultation
@@ -948,6 +974,10 @@ function GettingStartedWiki() {
           To get Dr. Mayfield's attention, type @mark, @dr. mayfield, or @dr. mark mayfield in your message. He gets an email notification so your question reaches him even when he is not in the chat. Use this when you need him specifically rather than the whole group.
         </Section>
 
+        <Section icon="📝" title="Turning in assignments">
+          Every assignment goes straight to Dr. Mayfield by email. No portal, no upload button, no login screen hiding somewhere. Just send your work to <a href="mailto:dr.mark.mayfield@gmail.com" style={{ color: '#3a55d9', textDecoration: 'underline' }}>dr.mark.mayfield@gmail.com</a> and you are done.
+        </Section>
+
         <Section icon="🛟" title="Tech help & support">
           Need help with the chat or having a technical issue? Type @support or @help in any channel. That sends the message straight to our support inbox so we can jump in.
         </Section>
@@ -958,6 +988,10 @@ function GettingStartedWiki() {
 
         <Section icon="🔍" title="Searching messages">
           Looking for something said earlier? Click the search icon at the top right of any channel and type a word or phrase to find past messages in that channel.
+        </Section>
+
+        <Section icon="🔗" title="Links and email addresses">
+          Drop a link or an email address into a message and it turns clickable on its own. A link opens in a new tab. An email address opens someone's inbox with a message ready to write. No extra formatting, no copy and paste. Just type it and go.
         </Section>
 
         <Section icon="🔑" title="Your account">
@@ -1039,7 +1073,7 @@ function ChannelSearchPanel({ channel, onJumpInfo }) {
               const name = u.name || u.id || 'Member';
               return (
                 <div key={m.id || i} style={{ padding: '10px 14px', borderBottom: '1px solid #f6f6f6', display: 'flex', gap: 10 }}>
-                  <Avatar name={name} color={u.color} size={26} />
+                  <Avatar name={name} color={u.color} size={26} image={u.image} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 2 }}>
                       <span style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
@@ -1130,12 +1164,12 @@ function App() {
 
   async function connectChat(profile) {
     try {
-      const res = await fetch(`${TOKEN_URL}?user_id=${encodeURIComponent(profile.id)}`);
+      const res = await fetch(`${APP_CONFIG.tokenUrl}?user_id=${encodeURIComponent(profile.id)}`);
       const data = await res.json();
       if (!data.token) throw new Error('Token not returned.');
-      const client = StreamChat.getInstance(API_KEY);
+      const client = StreamChat.getInstance(APP_CONFIG.apiKey);
       clientRef.current = client;
-      await client.connectUser({ id: profile.id, name: profile.name, color: profile.color, bio: profile.bio || '', link: profile.link || '', instructor: !!profile.instructor }, data.token);
+      await client.connectUser({ id: profile.id, name: profile.name, color: profile.color, image: profile.image || undefined, bio: profile.bio || '', link: profile.link || '', instructor: !!profile.instructor }, data.token);
 
       const initialId = getInitialChannelId();
       const initialChDef = ALL_CHANNELS.find(c => c.id === initialId) || ALL_CHANNELS.find(c => c.id === 'cats-general');
@@ -1335,7 +1369,7 @@ function App() {
       if (clientRef.current.user && clientRef.current.user.id !== id) {
         await connectChat(profile);
       } else {
-        await clientRef.current.upsertUser({ id: profile.id, name: profile.name, color: profile.color, bio: profile.bio || '', link: profile.link || '', instructor });
+        await clientRef.current.upsertUser({ id: profile.id, name: profile.name, color: profile.color, image: profile.image || undefined, bio: profile.bio || '', link: profile.link || '', instructor });
       }
     }
   }
@@ -1462,10 +1496,10 @@ function App() {
           .str-chat__main-panel{width:100%!important}
         }
       `}</style>
-      <Sidebar groups={CHANNEL_GROUPS} activeId={activeId} onSelect={handleChannelSelect} currentUser={currentUser} chatClient={chatClient} activeChannel={activeChannel} onEditProfile={() => setShowProfileForm(true)} unreadCounts={unreadCounts} mentionCounts={mentionCounts} isMobile={isMobile} mobileNavOpen={mobileNavOpen} onCloseMobileNav={() => setMobileNavOpen(false)} />
+      <Sidebar groups={APP_CONFIG.channelGroups} activeId={activeId} onSelect={handleChannelSelect} currentUser={currentUser} chatClient={chatClient} activeChannel={activeChannel} onEditProfile={() => setShowProfileForm(true)} unreadCounts={unreadCounts} mentionCounts={mentionCounts} isMobile={isMobile} mobileNavOpen={mobileNavOpen} onCloseMobileNav={() => setMobileNavOpen(false)} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', minHeight: 0, minWidth: 0 }}>
         {/* Persistent live-consult bar, visible across all channels */}
-        <a href={CONSULT_LINK} target="_blank" rel="noopener noreferrer"
+        <a href={APP_CONFIG.consult.link} target="_blank" rel="noopener noreferrer"
           style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, flexShrink: 0, background: 'linear-gradient(135deg, #3a55d9 0%, #2f44b8 100%)', color: '#fff', textDecoration: 'none', fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600, padding: '9px 16px', letterSpacing: '0.01em' }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{isMobile ? 'Live consults · every other week · 6pm MST' : 'Live consultations with Dr. Mayfield, every other week at 6pm MST (7pm CST / 8pm EST / 5pm PST). Full schedule in Getting Started.'}</span>
