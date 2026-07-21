@@ -6,16 +6,42 @@
 //   STREAM_SECRET  (type: Secret)  -- the Stream app SECRET (NOT the public API key)
 //
 // Usage from the chat app:
-//   GET https://mhms-chat-token.jonathan-5ad.workers.dev?user_id=cats-sarah-ab12c
+//   GET https://mhms-chat-token.jonathan-5ad.workers.dev?user_id=cats-...
 //   -> { "token": "<jwt>" }
 //
-// The token is a standard Stream user token: HS256 JWT with payload { user_id }
-// signed with the Stream app secret. No expiration is set so tokens stay valid.
+// CORS: this worker is called from the browser, so it must return an
+// Access-Control-Allow-Origin header that matches the calling page's origin.
+// Because the chat can be served from more than one origin (the custom
+// subdomain, the GitHub Pages address, and embedded in Squarespace), we keep
+// an allow-list and echo back whichever origin matches the request.
 //
-// NOTE: This is a low-security model appropriate for a paywalled cohort. Anyone
-// who can reach this URL can mint a token for any user_id. It is acceptable here
-// because the chat sits behind the Squarespace paywall and there is no sensitive
-// data, but do not reuse this pattern for anything requiring real auth.
+// ARCHITECTURAL DEBT (intentional, documented, not changed in v61):
+//   1. Any request that supplies a user_id can mint a token for that user_id.
+//      There is no verification that the caller is actually that person.
+//   2. An Origin that is not on ALLOWED_ORIGINS does not get rejected; it
+//      silently falls back to ALLOWED_ORIGINS[0] and still receives a token.
+//   Both are acceptable for a paywalled cohort chat with no sensitive data,
+//   but this is a low-security model and should not be reused for anything
+//   requiring real auth. See PROJECT_KNOWLEDGE.md for the full rationale.
+
+const ALLOWED_ORIGINS = [
+  'https://chat.mentalhealthmadesimple.life',
+  'https://jcoutdoors.github.io',
+  'https://www.mentalhealthmadesimple.life',
+  'https://mentalhealthmadesimple.life',
+];
+
+function corsHeaders(request) {
+  const origin = request.headers.get('Origin') || '';
+  // Echo the origin if it's on the allow-list; otherwise fall back to the subdomain.
+  const allow = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  return {
+    'Access-Control-Allow-Origin': allow,
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Vary': 'Origin',
+  };
+}
 
 function base64url(input) {
   return btoa(String.fromCharCode(...new Uint8Array(input)))
@@ -54,11 +80,7 @@ async function createStreamToken(userId, secret) {
 
 export default {
   async fetch(request, env) {
-    const cors = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    };
+    const cors = corsHeaders(request);
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: cors });
