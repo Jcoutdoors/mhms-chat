@@ -2,11 +2,11 @@
 
 This is the operating manual and current state for the custom community chat built for
 the MHMS / CATS cohort program. This lives in the repo and in the project knowledge so
-any new conversation starts with full context. **Current version: v61 live in production.**
+any new conversation starts with full context. **Current version: v62 live in production.**
 
-**IMPORTANT SOURCE/BUILD STATE (read before building):** The repo is fully at v61, source and
+**IMPORTANT SOURCE/BUILD STATE (read before building):** The repo is fully at v62, source and
 built files both. v61 absorbed the previously-uncommitted v60 work (clickable mailto links +
-two wiki sections), so that gap is closed; nothing is pending re-application. Two standing
+two wiki sections), so that gap is closed; nothing is pending re-application. Standing
 notes for the next session:
 - The Atlas AI agent is BUILT but ON HOLD and intentionally NOT in the repo. Jonathan wants to
  flesh out Atlas's scope before committing or wiring anything. Do not start Atlas work unless
@@ -17,9 +17,11 @@ notes for the next session:
  the rule stands: when Jonathan pastes a Worker's actual deployed source, that is ground
  truth over the repo copy. Do not assume the committed Worker files match Cloudflare without
  verifying.
-- v62 (Thread Reply Notifications) has passed Product Office release review, approved with
- notes, and lives on branch `v62-thread-reply-notifications`. It is NOT merged to main and
- NOT deployed; production is still v61. See the v62 section below for full detail.
+- v62 (Thread Reply Notifications) passed Product Office release review, approved with
+ notes, merged to main (merge commit `4cf69db8a032b261b73730c74b33319d7c738122`), and is
+ LIVE in production as of 2026-07-21. The branch `v62-thread-reply-notifications` still
+ exists (not deleted). See the v62 section below for full detail, including a post-deploy
+ smoke test against the live site.
 
 ---
 
@@ -334,13 +336,29 @@ If reactions, uploads, or user search ever break, re-check these.
  Build verified: index.jsx 1,586 lines (v59 baseline was 1,552; delta consistent with the
  changes, checked clean for corruption), bundle 1.8MB, queryUsers x4 in the bundle. Also
  corrected the stale "~1,100 lines" figure that had been sitting in SETUP.md.
+- **v62** - Thread Reply Notifications. Notifies a user when someone replies to a thread they
+ started, even while watching a different channel, without breaking the one-watched-channel
+ architecture. Also fixed a latent v51 bug: the custom `CatsThreadHeader` had never actually
+ rendered (wired to the wrong SDK prop). Reviewed, approved with notes, merged, and deployed
+ to production 2026-07-21. `src/index.jsx` 2,267 lines, bundle ~1.8MB. Full detail below.
 
-## v62 - Thread Reply Notifications (reviewed, NOT YET DEPLOYED)
+## v62 - Thread Reply Notifications (LIVE in production)
 
 **Status:** passed Product Office release review. Release recommendation: approved with
-notes. Lives on branch `v62-thread-reply-notifications`, not merged to main, not deployed.
-Production is still v61. `src/index.jsx` is 2,267 lines, `dist/chat.bundle.js` is
-approximately 1.8MB.
+notes. Merged to main via PR #1, merge commit `4cf69db8a032b261b73730c74b33319d7c738122`.
+Deployed to production on 2026-07-21 (GitHub Pages builds automatically from `main` root;
+this repo has no separate deploy gate, so the merge push itself triggered the live deploy).
+The branch `v62-thread-reply-notifications` still exists, not deleted. `src/index.jsx` is
+2,267 lines, `chat.bundle.js` is approximately 1.8MB. Deployment was verified directly: the
+live bundle at `chat.mentalhealthmadesimple.life/chat.bundle.js` was fetched and diffed
+byte-for-byte against the local v62 build, confirmed identical.
+
+**Post-deploy smoke test (against the live site, real production data):** app loads with no
+console errors, channel navigation works, an existing real thread opens and closes cleanly,
+the custom "Back" button renders correctly on both desktop and mobile (confirming the
+ThreadHeader fix is live), the bell renders, and switching channels shows no errors. A
+throwaway smoke-test profile used to run this check was hard-deleted from production
+afterward.
 
 **What it does:** notifies a user when someone replies to a thread they started, even when
 they are not currently watching that thread's channel, without watching any additional
@@ -388,6 +406,17 @@ the real production Stream app and real token worker. A temporary local CORS pro
 deleted after use, no secret involved) was used only to work around the token worker's origin
 allow-list rejecting `localhost`. The production `tokenUrl` was restored before the final build,
 and the diff was confirmed clean of any proxy or localhost reference.
+
+**Remaining notes:**
+- The deploy itself was a side effect, not a planned step: this repo's GitHub Pages source is
+ the `main` branch root with no separate deploy gate, so merging the PR to main deployed it
+ immediately. Anyone merging a future PR here should assume the same will happen.
+- Mention badges and existing browser notification/sound behavior were confirmed as
+ non-regressed by code review (untouched by this diff) rather than independently re-exercised
+ live, both before and after deploy.
+- The QA test threads posted in `cats-mod-10` during the browser walkthrough are no longer
+ present as of the post-deploy smoke test; not investigated further since it did not affect
+ verification.
 
 ## HARD LESSON: never watch all channels (read before touching notifications)
 
@@ -544,14 +573,12 @@ exactly the boundary this agent must hold.
  fix, because it needs accurate persisted unread state, which now exists. Show it only when
  there is something missed, and once per session rather than on every refresh.
 
-3. **Thread reply notifications.** Both Mark and Jessy asked for this independently: someone
- replies to a thread you started and you never find out. Scope agreed: notify on replies to
- threads you started (not full thread-participation tracking), delivered as an in-app badge
- plus the existing chime treatment, no email for now. BUILT as v62, reviewed and approved
- with notes, not yet merged or deployed. See the v62 section above for full detail.
-
-4. **Direct messaging** - 1:1 channels (Stream supports natively). Real UI build: DM list,
+3. **Direct messaging** - 1:1 channels (Stream supports natively). Real UI build: DM list,
  start-a-DM, unread handling. The biggest remaining chat feature; its own project.
+
+Thread reply notifications (both Mark and Jessy asked for this independently) shipped as v62,
+live in production as of 2026-07-21. See the v62 section above for full detail. No longer on
+this roadmap.
 
 Smaller polish, slot in anytime:
 - **Message grouping** - collapse consecutive messages from one person to show name/avatar once. Low effort, visual.
