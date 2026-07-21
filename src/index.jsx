@@ -14,6 +14,8 @@ import {
   useReactionHandler,
   useDeleteHandler,
   useChatContext,
+  useChannelActionContext,
+  useChannelStateContext,
   TypingIndicator,
   usePinHandler,
 } from 'stream-chat-react';
@@ -157,6 +159,31 @@ function fireMentionAlert(title, body) {
     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
     osc.start(); osc.stop(ctx.currentTime + 0.36);
   } catch (e) {}
+}
+
+// v62 SOURCE CANDIDATE — thread reply notifications. Not built, not tested.
+// Keyed by threadId, the parent message ID, so a live
+// notification.thread_message_new event and queryThreads() reconciliation for
+// the same thread cannot create duplicate entries. One notification represents
+// one unread thread, not one notification per reply. If multiple people reply
+// before the thread is opened, the most recent reply information is shown.
+function upsertThreadNote(setThreadNotes, note) {
+  setThreadNotes(prev => ({
+    ...prev,
+    [note.threadId]: {
+      ...(prev[note.threadId] || {}),
+      ...note,
+    },
+  }));
+}
+
+function removeThreadNote(setThreadNotes, threadId) {
+  setThreadNotes(prev => {
+    if (!prev[threadId]) return prev;
+    const next = { ...prev };
+    delete next[threadId];
+    return next;
+  });
 }
 
 function getInitialChannelId() {
@@ -1106,12 +1133,17 @@ function storeProfile(p) {
 // Custom thread header with a clear, pronounced close control (Stream's default
 // close button is faint and hard to find, on mobile and desktop). closeThread is
 // passed in by Stream's Thread component.
-function CatsThreadHeader({ closeThread, thread }) {
+function CatsThreadHeader({ closeThread, thread, onClose }) {
   const parentText = (thread && thread.text) ? thread.text : '';
   const preview = parentText.length > 48 ? parentText.slice(0, 48) + '…' : parentText;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid #eef0f5', background: '#fff', fontFamily: "'DM Sans', sans-serif" }}>
-      <button onClick={(e) => { if (closeThread) closeThread(e); }} title="Close thread"
+      <button
+        onClick={event => {
+          if (onClose) onClose();
+          if (closeThread) closeThread(event);
+        }}
+        title="Close thread"
         style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#f1f4fe', color: '#3a55d9', border: '1px solid #d9e1fb', cursor: 'pointer', fontSize: 13, fontWeight: 600, padding: '7px 12px 7px 9px', borderRadius: 9, fontFamily: "'DM Sans', sans-serif", flexShrink: 0, boxShadow: '0 1px 2px rgba(58,85,217,0.08)' }}
         onMouseEnter={e => { e.currentTarget.style.background = '#e6ecfd'; }}
         onMouseLeave={e => { e.currentTarget.style.background = '#f1f4fe'; }}>
@@ -1122,6 +1154,315 @@ function CatsThreadHeader({ closeThread, thread }) {
         <div style={{ fontSize: 14, fontWeight: 700, color: '#181b26' }}>Thread</div>
         {preview && <div style={{ fontSize: 11.5, color: '#969cac', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{preview}</div>}
       </div>
+    </div>
+  );
+}
+
+// v62 SOURCE CANDIDATE.
+// Mounted inside <Channel>, so this component can access openThread through
+// ChannelActionContext. It waits until the requested channel is active, fetches
+// the parent message through a REST request, and opens the existing Thread UI.
+// It does not watch an additional channel.
+function ThreadJumpHandler({
+  pendingThread,
+  activeId,
+  channel,
+  onOpened,
+  onFailed,
+}) {
+  const { openThread } = useChannelActionContext('ThreadJumpHandler');
+
+  useEffect(() => {
+    if (
+      !pendingThread ||
+      !channel ||
+      pendingThread.channelId !== activeId
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+
+    console.log('[CATS THREAD DIAG] thread jump attempted', {
+      channelId: pendingThread.channelId,
+      threadId: pendingThread.threadId,
+    });
+
+    (async () => {
+      try {
+        const resp = await channel.getMessagesById([
+          pendingThread.threadId,
+        ]);
+
+        const msg =
+          resp &&
+          resp.messages &&
+          resp.messages[0];
+
+        if (cancelled) return;
+
+        if (!msg) {
+          console.warn(
+            '[CATS THREAD DIAG] thread jump failed: parent message not found',
+            pendingThread.threadId
+          );
+
+          onFailed(pendingThread.threadId);
+          return;
+        }
+
+        if (!openThread) {
+          console.warn(
+            '[CATS THREAD DIAG] thread jump failed: openThread unavailable'
+          );
+
+          onFailed(pendingThread.threadId);
+          return;
+        }
+
+        openThread(msg);
+
+        if (cancelled) return;
+
+        onOpened(pendingThread.threadId);
+
+        try {
+          await channel.markRead({
+            thread_id: pendingThread.threadId,
+          });
+
+          console.log(
+            '[CATS THREAD DIAG] thread marked read',
+            pendingThread.threadId
+          );
+        } catch (e) {
+          console.warn(
+            '[CATS THREAD DIAG] markRead failed',
+            pendingThread.threadId,
+            e.message
+          );
+        }
+      } catch (e) {
+        if (cancelled) return;
+
+        console.warn(
+          '[CATS THREAD DIAG] thread jump failed',
+          e.message
+        );
+
+        onFailed(pendingThread.threadId);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    pendingThread,
+    channel,
+    activeId,
+    openThread,
+    onOpened,
+    onFailed,
+  ]);
+
+  return null;
+}
+
+// v62 SOURCE CANDIDATE — correction.
+// Mounted inside <Channel>, alongside ThreadJumpHandler. Stream's own
+// ChannelStateContext.thread is the single central signal for "which thread is
+// currently open," updated identically regardless of whether the thread was
+// opened via the bell (ThreadJumpHandler -> openThread) or a native
+// reply-count click (useOpenThreadHandler -> openThread). Watching it here
+// means the notification-clearing logic works for both paths without
+// attaching a separate handler to every message or reply-count control.
+function ActiveThreadWatcher({ setThreadNotes, setOpenThreadId, threadNotesRef, channel }) {
+  const { thread } = useChannelStateContext('ActiveThreadWatcher');
+  const threadId = thread ? thread.id : null;
+
+  useEffect(() => {
+    setOpenThreadId(threadId);
+
+    if (threadId && threadNotesRef.current[threadId]) {
+      removeThreadNote(setThreadNotes, threadId);
+
+      if (channel) {
+        channel.markRead({ thread_id: threadId }).catch(e => {
+          console.warn(
+            '[CATS THREAD DIAG] markRead (native open) failed',
+            e.message
+          );
+        });
+      }
+    }
+  }, [threadId, channel, setThreadNotes, setOpenThreadId, threadNotesRef]);
+
+  return null;
+}
+
+// v62 SOURCE CANDIDATE.
+// Minimal thread-reply notification surface. This is not a general notification
+// center.
+function ThreadNoteBell({ notes, onSelect }) {
+  const [open, setOpen] = useState(false);
+
+  const list = Object.values(notes).sort(
+    (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+  );
+
+  const count = list.length;
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        onClick={() => setOpen(current => !current)}
+        title="Thread replies"
+        style={{
+          width: 38,
+          height: 38,
+          borderRadius: 10,
+          border: '1px solid #e7e9f0',
+          background: '#fff',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          position: 'relative',
+          boxShadow: '0 1px 2px rgba(24,27,38,0.06)',
+        }}
+      >
+        <svg
+          width="17"
+          height="17"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="#5f6478"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+          <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+        </svg>
+
+        {count > 0 && (
+          <span
+            style={{
+              position: 'absolute',
+              top: -4,
+              right: -4,
+              background: '#c0392b',
+              color: '#fff',
+              fontSize: 10,
+              fontWeight: 700,
+              borderRadius: 9,
+              minWidth: 16,
+              height: 16,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '0 3px',
+              fontFamily: "'DM Sans', sans-serif",
+            }}
+          >
+            {count}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 44,
+            right: 0,
+            width: 280,
+            maxHeight: 320,
+            overflowY: 'auto',
+            background: '#fff',
+            border: '1px solid #e7e9f0',
+            borderRadius: 12,
+            boxShadow: '0 8px 24px rgba(24,27,38,0.14)',
+            zIndex: 30,
+            fontFamily: "'DM Sans', sans-serif",
+          }}
+        >
+          {count === 0 && (
+            <div
+              style={{
+                padding: 16,
+                fontSize: 12.5,
+                color: '#969cac',
+              }}
+            >
+              No new thread replies.
+            </div>
+          )}
+
+          {list.map(note => (
+            <button
+              key={note.threadId}
+              onClick={() => {
+                onSelect(note);
+                setOpen(false);
+              }}
+              style={{
+                display: 'block',
+                width: '100%',
+                textAlign: 'left',
+                padding: '10px 14px',
+                border: 'none',
+                borderBottom: '1px solid #f1f2f6',
+                background: 'none',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={event => {
+                event.currentTarget.style.background = '#f7f8fc';
+              }}
+              onMouseLeave={event => {
+                event.currentTarget.style.background = 'none';
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  color: '#181b26',
+                }}
+              >
+                {note.replierName} replied
+              </div>
+
+              <div
+                style={{
+                  fontSize: 11,
+                  color: '#969cac',
+                  margin: '1px 0',
+                }}
+              >
+                in{' '}
+                {(ALL_CHANNELS.find(
+                  channel => channel.id === note.channelId
+                ) || {}).name || note.channelId}
+              </div>
+
+              <div
+                style={{
+                  fontSize: 11.5,
+                  color: '#969cac',
+                  marginTop: 2,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {note.preview || '(no preview)'}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1140,9 +1481,48 @@ function App() {
   const [rosterMembers, setRosterMembers] = useState([]);
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth <= 768 : false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  // v62 SOURCE CANDIDATE — thread reply notifications.
+  // Not built, tested, committed, pushed, or deployed.
+  const [threadNotes, setThreadNotes] = useState({});
+  const [pendingThread, setPendingThread] = useState(null);
+  const [openThreadId, setOpenThreadId] = useState(null);
   const clientRef = useRef(null);
   const activeIdRef = useRef(activeId);
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
+  const openThreadIdRef = useRef(null);
+  useEffect(() => {
+    openThreadIdRef.current = openThreadId;
+  }, [openThreadId]);
+
+  // v62 SOURCE CANDIDATE — correction. Lets ActiveThreadWatcher read the
+  // latest threadNotes without needing it in its effect dependency array.
+  const threadNotesRef = useRef({});
+  useEffect(() => {
+    threadNotesRef.current = threadNotes;
+  }, [threadNotes]);
+
+  const threadListenersRef = useRef([]);
+
+  function teardownThreadListeners() {
+    threadListenersRef.current.forEach(unsubscribe => {
+      try {
+        unsubscribe();
+      } catch (e) {
+        console.warn(
+          '[CATS THREAD DIAG] listener cleanup failed',
+          e.message
+        );
+      }
+    });
+
+    threadListenersRef.current = [];
+  }
+
+  useEffect(() => {
+    return () => {
+      teardownThreadListeners();
+    };
+  }, []);
 
   useEffect(() => {
     function onResize() { setIsMobile(window.innerWidth <= 768); }
@@ -1290,6 +1670,239 @@ function App() {
       client.on('message.new', event => detectAndAlert(event));
       client.on('notification.message_new', event => detectAndAlert(event));
       requestNotificationPermission();
+
+      // v62 SOURCE CANDIDATE — thread reply notifications.
+      teardownThreadListeners();
+
+      const handleThreadReply = async event => {
+        console.log(
+          '[CATS THREAD DIAG] notification.thread_message_new received',
+          {
+            keys: Object.keys(event || {}),
+            channel_id: event.channel_id,
+            cid: event.cid,
+            parent_id: event.message?.parent_id,
+            replier: event.message?.user?.id,
+          }
+        );
+
+        const reply = event.message || {};
+        const parentId = reply.parent_id;
+
+        if (!parentId) {
+          console.warn(
+            '[CATS THREAD DIAG] no parent_id on event, skipping'
+          );
+          return;
+        }
+
+        const replierId = reply.user?.id;
+
+        if (!replierId || replierId === profile.id) {
+          console.log('[CATS THREAD DIAG] rejected: own reply');
+          return;
+        }
+
+        const channelId =
+          event.channel_id ||
+          (event.cid || '').replace('messaging:', '');
+
+        if (!channelId) {
+          console.warn(
+            '[CATS THREAD DIAG] no channel ID on event, skipping'
+          );
+          return;
+        }
+
+        try {
+          const probe = clientRef.current.channel(
+            'messaging',
+            channelId
+          );
+
+          const response = await probe.getMessagesById([parentId]);
+
+          const parent =
+            response &&
+            response.messages &&
+            response.messages[0];
+
+          if (!parent) {
+            console.warn(
+              '[CATS THREAD DIAG] parent lookup returned no message',
+              parentId
+            );
+            return;
+          }
+
+          if (parent.user?.id !== profile.id) {
+            console.log(
+              '[CATS THREAD DIAG] rejected: not my thread',
+              {
+                parentAuthor: parent.user?.id,
+              }
+            );
+            return;
+          }
+
+          console.log(
+            '[CATS THREAD DIAG] accepted: notifying',
+            {
+              threadId: parentId,
+              channelId,
+            }
+          );
+
+          upsertThreadNote(setThreadNotes, {
+            threadId: parentId,
+            channelId,
+            replierName: reply.user?.name || 'Someone',
+            replierId,
+            preview: (reply.text || '').slice(0, 120),
+            createdAt:
+              reply.created_at ||
+              new Date().toISOString(),
+          });
+
+          if (openThreadIdRef.current !== parentId) {
+            const channelName =
+              (
+                ALL_CHANNELS.find(
+                  channel => channel.id === channelId
+                ) || {}
+              ).name || 'the chat';
+
+            fireMentionAlert(
+              `${reply.user?.name || 'Someone'} replied to your thread`,
+              `In ${channelName}: ${(reply.text || '').slice(0, 120)}`
+            );
+          }
+        } catch (e) {
+          console.warn(
+            '[CATS THREAD DIAG] parent lookup failed',
+            e.message
+          );
+        }
+      };
+
+      const threadReplySubscription = client.on(
+        'notification.thread_message_new',
+        handleThreadReply
+      );
+
+      threadListenersRef.current.push(() => {
+        threadReplySubscription.unsubscribe();
+      });
+
+      // Persisted reconciliation.
+      //
+      // queryThreads() returns Thread objects. Thread state is read through
+      // thread.state.getLatestValue(). Direct getters such as thread.id,
+      // thread.channel, and thread.ownUnreadCount must be verified against the
+      // installed stream-chat version before this hunk is accepted.
+      //
+      // watch:false is passed explicitly so queryThreads() does not expand the
+      // application's one-watched-channel architecture.
+      const reconcileThreads = async trigger => {
+        try {
+          const result = await client.queryThreads({
+            watch: false,
+            limit: 30,
+            participant_limit: 10,
+            reply_limit: 1,
+          });
+
+          const threads = result.threads || [];
+
+          console.log(
+            '[CATS THREAD DIAG] queryThreads result',
+            {
+              trigger,
+              count: threads.length,
+            }
+          );
+
+          threads.forEach(thread => {
+            const unread = thread.ownUnreadCount;
+
+            if (!unread) return;
+
+            const state = thread.state.getLatestValue();
+            const parentUserId =
+              state.parentMessage?.user?.id;
+
+            if (parentUserId !== profile.id) {
+              return;
+            }
+
+            const lastReply =
+              state.replies && state.replies.length
+                ? state.replies[state.replies.length - 1]
+                : null;
+
+            const channelObject = thread.channel;
+
+            const channelId = channelObject
+              ? (
+                  channelObject.id ||
+                  (channelObject.cid || '').replace(
+                    'messaging:',
+                    ''
+                  )
+                )
+              : null;
+
+            if (!channelId) {
+              console.warn(
+                '[CATS THREAD DIAG] queryThreads thread missing channel ID',
+                thread.id
+              );
+              return;
+            }
+
+            console.log(
+              '[CATS THREAD DIAG] queryThreads reconciled unread thread',
+              {
+                threadId: thread.id,
+                channelId,
+                unread,
+              }
+            );
+
+            upsertThreadNote(setThreadNotes, {
+              threadId: thread.id,
+              channelId,
+              replierName:
+                lastReply?.user?.name || 'Someone',
+              replierId: lastReply?.user?.id,
+              preview: (lastReply?.text || '').slice(
+                0,
+                120
+              ),
+              createdAt:
+                state.updatedAt ||
+                new Date().toISOString(),
+            });
+          });
+        } catch (e) {
+          console.warn(
+            '[CATS THREAD DIAG] queryThreads reconciliation failed',
+            trigger,
+            e.message
+          );
+        }
+      };
+
+      reconcileThreads('initial-connect');
+
+      const recoveredSubscription = client.on(
+        'connection.recovered',
+        () => reconcileThreads('connection.recovered')
+      );
+
+      threadListenersRef.current.push(() => {
+        recoveredSubscription.unsubscribe();
+      });
     } catch (e) {
       setError('Chat error: ' + e.message);
     }
@@ -1328,6 +1941,20 @@ function App() {
       const prevCh = channelMap[prevId];
       if (prevCh && prevCh.stopWatching) { try { await prevCh.stopWatching(); } catch (e) {} }
     }
+  }
+
+  // v62 SOURCE CANDIDATE.
+  // Reuses handleChannelSelect so the previous watched channel is stopped and
+  // only the selected channel becomes active.
+  function handleThreadNoteClick(note) {
+    if (note.channelId !== activeId) {
+      handleChannelSelect(note.channelId);
+    }
+
+    setPendingThread({
+      channelId: note.channelId,
+      threadId: note.threadId,
+    });
   }
 
   useEffect(() => {
@@ -1517,11 +2144,34 @@ function App() {
           <GettingStartedWiki />
         ) : activeChannel && (
           <Chat client={chatClient} theme="str-chat__theme-light">
-            <Channel channel={activeChannel} EmptyStateIndicator={() => <ChannelEmptyState channelId={activeId} onJump={handleChannelSelect} />}>
+            <Channel
+              channel={activeChannel}
+              EmptyStateIndicator={() => <ChannelEmptyState channelId={activeId} onJump={handleChannelSelect} />}
+              ThreadHeader={threadHeaderProps => (
+                <CatsThreadHeader
+                  {...threadHeaderProps}
+                  onClose={() => setOpenThreadId(null)}
+                />
+              )}
+            >
               <Window>
                 <div style={{ position: 'relative' }}>
                   <ChannelHeader />
-                  <div style={{ position: 'absolute', top: 13, right: 24, zIndex: 60 }}>
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 13,
+                      right: 24,
+                      zIndex: 60,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <ThreadNoteBell
+                      notes={threadNotes}
+                      onSelect={handleThreadNoteClick}
+                    />
                     <ChannelSearchPanel channel={activeChannel} />
                   </div>
                 </div>
@@ -1573,7 +2223,38 @@ function App() {
                   )}
                 </div>
               </Window>
-              <Thread ThreadHeader={CatsThreadHeader} additionalMessageInputProps={{ grow: true, minRows: isMobile ? 1 : 5, maxRows: isMobile ? 6 : 12 }} />
+              <Thread
+                additionalMessageInputProps={{
+                  grow: true,
+                  minRows: isMobile ? 1 : 5,
+                  maxRows: isMobile ? 6 : 12,
+                }}
+              />
+
+              <ThreadJumpHandler
+                pendingThread={pendingThread}
+                activeId={activeId}
+                channel={activeChannel}
+                onOpened={() => {
+                  // Notification clearing and openThreadId are now handled
+                  // centrally by ActiveThreadWatcher for both bell-driven and
+                  // native thread opens. This callback only needs to clear the
+                  // pending cross-channel jump state.
+                  setPendingThread(null);
+                }}
+                onFailed={() => {
+                  // Leave the bell notification intact so the user can retry.
+                  // Clear only the pending automatic jump to prevent a retry loop.
+                  setPendingThread(null);
+                }}
+              />
+
+              <ActiveThreadWatcher
+                setThreadNotes={setThreadNotes}
+                setOpenThreadId={setOpenThreadId}
+                threadNotesRef={threadNotesRef}
+                channel={activeChannel}
+              />
             </Channel>
           </Chat>
         )}

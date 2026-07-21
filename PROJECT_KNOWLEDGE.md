@@ -17,6 +17,9 @@ notes for the next session:
  the rule stands: when Jonathan pastes a Worker's actual deployed source, that is ground
  truth over the repo copy. Do not assume the committed Worker files match Cloudflare without
  verifying.
+- v62 (Thread Reply Notifications) has passed Product Office release review, approved with
+ notes, and lives on branch `v62-thread-reply-notifications`. It is NOT merged to main and
+ NOT deployed; production is still v61. See the v62 section below for full detail.
 
 ---
 
@@ -332,6 +335,60 @@ If reactions, uploads, or user search ever break, re-check these.
  changes, checked clean for corruption), bundle 1.8MB, queryUsers x4 in the bundle. Also
  corrected the stale "~1,100 lines" figure that had been sitting in SETUP.md.
 
+## v62 - Thread Reply Notifications (reviewed, NOT YET DEPLOYED)
+
+**Status:** passed Product Office release review. Release recommendation: approved with
+notes. Lives on branch `v62-thread-reply-notifications`, not merged to main, not deployed.
+Production is still v61. `src/index.jsx` is 2,267 lines, `dist/chat.bundle.js` is
+approximately 1.8MB.
+
+**What it does:** notifies a user when someone replies to a thread they started, even when
+they are not currently watching that thread's channel, without watching any additional
+channel and without breaking the one-watched-channel architecture (see the hard lesson
+below).
+
+**Verified with a live cross-channel test against the real production Stream app**
+(isolated throwaway users and channels, cleaned up after): `notification.thread_message_new`
+fired for User A while User A was watching only Channel A. Channel B, where the reply was
+actually posted, remained unwatched throughout, confirmed both before and after the test.
+
+**Notification behavior, all directly verified in a two-user browser walkthrough:**
+- One notification represents one unread thread. Multiple unread replies to the same thread
+ update the same entry instead of creating duplicates; the most recent reply's preview and
+ replier name replace the previous one.
+- Persists across reload/reconnect through `client.queryThreads({ watch: false, ... })`
+ reconciliation, so a missed reply still surfaces the notification after a reload even
+ without the live event having been received in that session.
+- Clicking the bell notification switches to the correct channel, opens the correct parent
+ thread, and clears the notification.
+- Opening the same thread through Stream's native reply-count link, not just the bell, also
+ clears the notification. This is handled by one centralized watcher on the thread state
+ Stream already exposes, not by attaching a click handler to every message.
+- A reply to a thread the current user does not own does not notify them (verified with a
+ separate throwaway thread owner and a separate throwaway replier, neither being the
+ observing user).
+- A user's own reply to their own thread does not notify them.
+- The one-watched-channel architecture is unchanged. No additional channel is ever watched.
+
+**Bug found and fixed in the same pass (pre-existing, not introduced by v62):**
+`CatsThreadHeader` (added in v51 for a clearer close control, since Stream's default close
+was reported as too faint to find on mobile and desktop) has never actually rendered.
+`stream-chat-react` does not accept a `ThreadHeader` prop on `<Thread>`; it must be passed to
+`<Channel>`, which feeds it through to `ComponentContext`. The prop had been placed on
+`<Thread>` since v51, where React silently ignores unrecognized props, so every thread panel
+has shown Stream's plain default close icon instead of the intended indigo "Back" button, on
+every version since v51. Corrected by moving `ThreadHeader` to `<Channel>`, with no change to
+`CatsThreadHeader` itself. Verified rendering correctly on both desktop and mobile after the
+fix.
+
+**No Cloudflare Worker changes were required or made.**
+
+**QA process note:** there is no sandbox or dev Stream app, so local browser QA runs against
+the real production Stream app and real token worker. A temporary local CORS proxy (gitignored,
+deleted after use, no secret involved) was used only to work around the token worker's origin
+allow-list rejecting `localhost`. The production `tokenUrl` was restored before the final build,
+and the diff was confirmed clean of any proxy or localhost reference.
+
 ## HARD LESSON: never watch all channels (read before touching notifications)
 
 Watching a Stream channel makes you a present watcher. When a message arrives in a channel
@@ -490,7 +547,8 @@ exactly the boundary this agent must hold.
 3. **Thread reply notifications.** Both Mark and Jessy asked for this independently: someone
  replies to a thread you started and you never find out. Scope agreed: notify on replies to
  threads you started (not full thread-participation tracking), delivered as an in-app badge
- plus the existing chime treatment, no email for now.
+ plus the existing chime treatment, no email for now. BUILT as v62, reviewed and approved
+ with notes, not yet merged or deployed. See the v62 section above for full detail.
 
 4. **Direct messaging** - 1:1 channels (Stream supports natively). Real UI build: DM list,
  start-a-DM, unread handling. The biggest remaining chat feature; its own project.
