@@ -105,7 +105,7 @@ const ASSISTANT_CONFIG = {
   heroImageFallbackSrc: './atlas-hero-white.png',
   heroImageAlt: 'ATLAS',
   welcomeBackGreeting: firstName => (firstName ? `Welcome back, ${firstName}.` : 'Welcome back.'),
-  welcomeBackIntro: "I'm here to help you get oriented. Here's a quick look at what you missed.",
+  welcomeBackIntro: "I'm here to help you get oriented. Here's what's happened since your last visit.",
 };
 
 function normalizeEmail(email) {
@@ -1580,7 +1580,7 @@ function WelcomeBackSummary({ recap, firstName, onSelectChannel, onSelectThread,
             anchored to the right so the raised arm points back toward the message.
             On mobile the arrangement stacks with the image centered on top. The
             transparent asset sits directly on the dialog, not inside an icon box. */}
-        <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: 'center', gap: isMobile ? 4 : 18, marginBottom: 18 }}>
+        <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: 'center', gap: isMobile ? 4 : 6, marginBottom: 18 }}>
           <div style={{ order: isMobile ? 2 : 1, flex: 1, minWidth: 0, textAlign: isMobile ? 'center' : 'left' }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: '#3a55d9', letterSpacing: '0.09em', textTransform: 'uppercase', marginBottom: 6 }}>
               {ASSISTANT_CONFIG.name}
@@ -1592,7 +1592,11 @@ function WelcomeBackSummary({ recap, firstName, onSelectChannel, onSelectThread,
               {ASSISTANT_CONFIG.welcomeBackIntro}
             </div>
           </div>
-          <div style={{ order: isMobile ? 1 : 2, width: isMobile ? 132 : 150, flexShrink: 0 }}>
+          {/* Desktop: ATLAS is enlarged and leans into the hero area (negative left
+              margin) so his raised arm reaches toward the welcome copy, reading as a
+              present guide rather than an icon parked in empty space. Mobile size is
+              unchanged. */}
+          <div style={{ order: isMobile ? 1 : 2, width: isMobile ? 132 : 188, flexShrink: 0, marginLeft: isMobile ? 0 : -14, marginRight: isMobile ? 0 : -4, marginBottom: isMobile ? 0 : -2 }}>
             {!imgFailed ? (
               <img
                 src={ASSISTANT_CONFIG.heroImageSrc}
@@ -1606,6 +1610,13 @@ function WelcomeBackSummary({ recap, firstName, onSelectChannel, onSelectThread,
           </div>
         </div>
 
+        {/* Recap body. v63 intentionally ships exactly two activity sections: unread
+            channel messages, then unread thread replies. Each is a self-contained,
+            independently-conditional block, so v63.1 sections (New from Mark, org
+            announcements, release notes, new features, resources, upcoming events,
+            recommended next steps) slot in here as sibling blocks between the activity
+            sections and the "Continue to chat" action, without restructuring this
+            component. No section framework is abstracted ahead of that need. */}
         {channelCount > 0 && (
           <div style={{ fontSize: 12.5, color: '#555', marginBottom: 8 }}>
             <strong>{totalUnread}</strong> unread {totalUnread === 1 ? 'message' : 'messages'} across <strong>{channelCount}</strong> {channelCount === 1 ? 'channel' : 'channels'}
@@ -1660,6 +1671,9 @@ function WelcomeBackSummary({ recap, firstName, onSelectChannel, onSelectThread,
             })}
           </div>
         )}
+
+        {/* v63.1 SECTION INSERTION POINT — future non-activity sections render here,
+            as sibling blocks above the Continue action. Not implemented in v63. */}
 
         <button
           onClick={onDismiss}
