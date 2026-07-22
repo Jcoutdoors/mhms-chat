@@ -22,6 +22,9 @@ notes for the next session:
  LIVE in production as of 2026-07-21. The branch `v62-thread-reply-notifications` still
  exists (not deleted). See the v62 section below for full detail, including a post-deploy
  smoke test against the live site.
+- v63 (Welcome Back Summary) is implemented and QA'd on branch
+ `v63-welcome-back-summary`, NOT merged, NOT deployed. Production is still v62. See the
+ v63 section below for full detail.
 
 ---
 
@@ -418,6 +421,151 @@ and the diff was confirmed clean of any proxy or localhost reference.
  present as of the post-deploy smoke test; not investigated further since it did not affect
  verification.
 
+## v63 - Welcome Back Summary (implemented, QA'd, NOT YET MERGED OR DEPLOYED)
+
+**Status:** implemented and QA'd on branch `v63-welcome-back-summary`. Not merged to main,
+not deployed. Production is still v62. `src/index.jsx` is 2,642 lines,
+`chat.bundle.js` is approximately 1.76MB.
+
+**What it does:** ATLAS presents a deterministic "welcome back" recap to a *returning* user
+(never a brand-new one) after they connect, summarizing unread channel messages and unread
+thread replies they missed, with direct links to open the relevant channel or thread.
+**This is not an AI-generated summary.** ATLAS is the presenter; the content is entirely
+existing Stream Chat data run through fixed, deterministic rules. No LLM call, no generated
+prose, no vector search, no embeddings, no server-side summarization is used anywhere in
+this feature.
+
+**Data sources (no new Stream queries, no parallel unread-tracking system):**
+- Channel recap: the existing `unreadCounts` state (already seeded from
+ `channel.countUnread()` in `connectChat`), enriched with the channel's display name and
+ its latest message (`channel.state.latestMessages`).
+- Thread recap: the existing v62 `threadNotes` state, populated by both the live
+ `notification.thread_message_new` handler and `client.queryThreads({ watch: false, ... })`
+ reconciliation. `threadNotes` entries were extended with one new field, `latestReplyId`
+ (the reply message's own id), needed for the recap's identity signature; no other v62
+ state shape changed.
+
+**Counting rules, and the empirical test that established them:** before writing any
+counting logic, this was tested directly against a live throwaway Stream channel: a
+top-level message was sent (channel unread count went 0 to 1), then a thread reply was
+added on top of it (channel unread count stayed at 1, did not move). **Verified:
+`channel.countUnread()` does NOT include thread replies.** Channel-unread and
+thread-unread are disjoint counting domains. Per this result, the recap presents them as
+two separate categories ("X unread messages across Y channels" and "Z replies in threads
+you started") and never sums them into one implied-unique total.
+
+**Loading and settled-state behavior:** the recap waits on two independent readiness
+signals before it may ever evaluate: `channelUnreadReady` (set after the existing
+unread-seeding step in `connectChat` completes, success or fallback) and
+`threadRecoveryReady` (set via `.finally()` on the existing, still-fire-and-forget
+`reconcileThreads('initial-connect')` call). Both fail open: if either data source fails,
+the flag is still set true, so the recap either shows a partial (e.g., channel-only) recap
+or is silently skipped, but chat is never blocked and no partially-loaded recap is ever
+shown and then changed after display.
+
+**Session dismissal strategy:** a deterministic, sorted-pair signature as specified: for
+each channel with unread activity, `(channelId, latestRelevantMessageId)`; for each thread
+with unread replies, `(threadId, latestReplyId)`. `latestRelevantMessageId` is the id of
+the newest message in a channel whose unread count is > 0. This is reliable because
+`countUnread()`'s own implementation (verified directly in the installed `stream-chat`
+source) counts messages with `created_at` after the user's read cursor, so whenever the
+count is nonzero, the channel's newest message is guaranteed to be part of that unread
+window. Both lists are sorted by id before being stored, so the record is deterministic
+regardless of fetch order. No hashing was used or added: the repo has no existing hashing
+utility, and the serialized record is well within reasonable `sessionStorage` size, so
+adding a hashing dependency for this alone wasn't warranted; the plain sorted-pair record
+is stored directly. Rather than a single opaque signature comparison, the acknowledged
+record is a genuine per-item map (`{channels: {id: lastId}, threads: {id: lastReplyId}}`),
+written to `sessionStorage` at the moment the recap is presented (covers both "dismissed"
+and "opened an item" outcomes identically). Reopening requires at least one item's id to
+differ from what's already acknowledged; a shrinking recap (reading one item, or a count
+merely decreasing) never reopens it, since that only removes or re-matches existing ids,
+it never introduces a new one.
+
+**First-use behavior:** `currentUser.welcomed` (the existing flag gating the one-time
+`WelcomeCard`) is reused as-is, exactly as anticipated, with no change to how or when it's
+written. One nuance found and handled: `dismissWelcome()` flips `welcomed` to `true`
+client-side the moment a brand-new user finishes their first `WelcomeCard`, in the same
+session. If the recap reacted to the live value, a brand-new user could be told "welcome
+back" moments after finishing onboarding, in the same visit. Fix: `wasReturningUserRef`
+snapshots `welcomed` the first time `currentUser` is known for this page load, before any
+same-session dismissal could flip it, and the recap gates on that snapshot, not the live
+value. Verified directly: injecting real unread activity for a brand-new user in their
+first session correctly produced no recap, even though the bell and channel badge both
+correctly showed the activity; reloading (a genuinely new session) then correctly showed
+the recap.
+
+**Assistant configuration boundary:** a single `ASSISTANT_CONFIG` constant (name, hero
+image path, hero image alt text, welcome-back greeting function), placed directly after
+`APP_CONFIG`. Nothing outside this object assumes the name "ATLAS." This is deliberately
+the smallest seam that keeps it a drop-in replacement for org-level configuration in v64,
+not a new configuration system.
+
+**Image assets:**
+- `atlas-hero-transparent.png` (1024x1024, PNG with alpha, ~1.6MB) - used in the dialog
+- `atlas-hero-white.png` (1254x1254, PNG, no alpha, ~1.2MB) - held as the documented
+ fallback context (white background), not currently wired to an automatic runtime
+ fallback path since the transparent version is the one actually used
+- Both are original files provided directly, copied byte-for-byte unaltered (verified via
+ `diff`), placed at repo root following the existing flat-file convention used by
+ `favicon.ico`/`apple-touch-icon.png`/`icon-192.png`/`icon-512.png`. Referenced via plain
+ relative `src` strings in JSX, NOT imported into the webpack bundle: this repo's webpack
+ config uses `asset/inline` for images, which would have base64-embedded 1.2-1.6MB
+ directly into `chat.bundle.js`. Confirmed in the built bundle: `chat.bundle.js` grew by
+ only what the new source code itself added, and the image files load as independent
+ network requests.
+
+**Privacy:** the dialog never renders full message bodies, attachments, images, embedded
+links, rich text, reactions, or file names. Thread previews reuse v62's existing
+120-character plain-text `preview` field, truncated further to 60 characters specifically
+for the recap's compact list display.
+
+**Failure isolation:** recap computation is wrapped in try/catch and fails open (logs a
+warning, skips the recap, chat is unaffected). `sessionStorage` reads and writes are each
+wrapped in their own try/catch or so are unavailable/throwing environments to fail open
+the same way. Image load failure falls back to a plain colored circle rather than a broken
+image icon.
+
+**Pre-existing v62 bug found and fixed during v63 QA (not a v63 defect):** `upsertThreadNote`
+had no recency check. Stream can redeliver an older `notification.thread_message_new` event
+on reconnect, interleaved with `queryThreads()` reconciliation (which fetches the true
+latest state); without a guard, a stale redelivered event arriving after the correct
+reconciliation result would silently overwrite it. This was caught empirically: repeated
+QA rounds intermittently showed the recap failing to detect genuinely new thread replies,
+traced to `threadNotes` reverting to an older reply's id after a reconnect. Fixed with a
+minimal recency guard in `upsertThreadNote`, comparing `createdAt` before accepting an
+incoming update. This predates v63 (the function was introduced in v62) and would have
+caused subtly stale bell previews under the same race even without v63; flagged here as a
+distinct finding per the standing instruction not to fold v62 root causes into v63's own
+bug list.
+
+**Test results:** production build clean (2 expected asset-size warnings only, same as
+every build). Desktop and mobile QA both passed: brand-new user never sees the recap
+(verified with real injected activity present); returning user sees the correct recap for
+channel-only, thread-only, and combined activity; zero-activity returning user sees no
+recap; channel item and thread item clicks both navigate correctly and close the recap;
+duplicate/repeated replies to the same thread collapse to one entry; new activity produces
+a new recap; reading one item does not reopen the recap with the remainder; rerenders,
+reconnects, and unchanged state never reopen it; existing v62 behavior (bell, native
+thread-open clearing, `CatsThreadHeader` Back button, one-watched-channel architecture) all
+directly re-verified working alongside v63, on both desktop and mobile. Keyboard
+accessibility verified: initial focus lands on the close button, Tab/Shift+Tab cycles only
+within the dialog and wraps correctly, Escape closes it.
+
+**Known limitations:**
+- The white-background hero image is held as documented fallback context but has no
+ automatic runtime switch-over path in this release; only the transparent version is
+ wired into the dialog.
+- Neither image was compressed or resized; both are large for their small display size
+ (see `TECHNICAL_DEBT.md`).
+- Mention badges and browser notification/sound behavior were not independently
+ re-exercised live in this pass (unchanged code, same reasoning as the v62 note above).
+
+**Future migration path (v64):** `ASSISTANT_CONFIG` is designed to become one entry in a
+future per-organization configuration structure without changing any code that reads from
+it, just swapping where the object comes from (e.g., keyed by org id instead of a single
+module-level constant).
+
 ## HARD LESSON: never watch all channels (read before touching notifications)
 
 Watching a Stream channel makes you a present watcher. When a message arrives in a channel
@@ -569,16 +717,16 @@ exactly the boundary this agent must hold.
  standing decision holds: ONE image, no per-pose art, no per-message custom field, no
  model-chosen pose, no crisis-override pose logic.
 
-2. **Welcome-back "here's what you missed" summary.** Deliberately queued behind the Option A
- fix, because it needs accurate persisted unread state, which now exists. Show it only when
- there is something missed, and once per session rather than on every refresh.
-
-3. **Direct messaging** - 1:1 channels (Stream supports natively). Real UI build: DM list,
+2. **Direct messaging** - 1:1 channels (Stream supports natively). Real UI build: DM list,
  start-a-DM, unread handling. The biggest remaining chat feature; its own project.
 
 Thread reply notifications (both Mark and Jessy asked for this independently) shipped as v62,
 live in production as of 2026-07-21. See the v62 section above for full detail. No longer on
 this roadmap.
+
+Welcome-back "here's what you missed" summary is implemented and QA'd as v63, on branch
+`v63-welcome-back-summary`, not yet merged or deployed. See the v63 section above for full
+detail. No longer on this roadmap.
 
 Smaller polish, slot in anytime:
 - **Message grouping** - collapse consecutive messages from one person to show name/avatar once. Low effort, visual.
