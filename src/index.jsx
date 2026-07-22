@@ -93,6 +93,21 @@ const APP_CONFIG = {
   ],
 };
 
+// v63 SOURCE CANDIDATE.
+// Isolates everything about "which assistant, which image, which welcome-back copy" from
+// the platform logic that presents the Welcome Back summary. The initial MHMS build uses
+// ATLAS, but nothing outside this object should assume that name, image path, or wording.
+// This is intentionally the smallest seam that keeps v64's org-level configuration a
+// drop-in replacement rather than a rewrite: a plain constants object, not a config system.
+const ASSISTANT_CONFIG = {
+  name: 'ATLAS',
+  heroImageSrc: './atlas-hero-transparent.png',
+  heroImageFallbackSrc: './atlas-hero-white.png',
+  heroImageAlt: 'ATLAS',
+  welcomeBackGreeting: firstName => (firstName ? `Welcome back, ${firstName}.` : 'Welcome back.'),
+  welcomeBackIntro: "I'm here to help you get oriented. Here's what's happened since your last visit.",
+};
+
 function normalizeEmail(email) {
   return (email || '').trim().toLowerCase();
 }
@@ -168,13 +183,26 @@ function fireMentionAlert(title, body) {
 // one unread thread, not one notification per reply. If multiple people reply
 // before the thread is opened, the most recent reply information is shown.
 function upsertThreadNote(setThreadNotes, note) {
-  setThreadNotes(prev => ({
-    ...prev,
-    [note.threadId]: {
-      ...(prev[note.threadId] || {}),
-      ...note,
-    },
-  }));
+  setThreadNotes(prev => {
+    const existing = prev[note.threadId];
+    // v63 SOURCE CANDIDATE — pre-existing v62 data race, found and fixed during v63 QA.
+    // Stream can redeliver an older notification.thread_message_new event on reconnect
+    // (interleaved with queryThreads() reconciliation, which fetches the true latest
+    // state). Without this guard, a stale redelivered event arriving after the correct
+    // reconciliation result would silently overwrite it, since the merge below has no
+    // ordering check. Only accept the incoming note if it's at least as new as what's
+    // already stored, so out-of-order delivery can no longer regress the note.
+    if (existing && existing.createdAt && note.createdAt && new Date(note.createdAt) < new Date(existing.createdAt)) {
+      return prev;
+    }
+    return {
+      ...prev,
+      [note.threadId]: {
+        ...(existing || {}),
+        ...note,
+      },
+    };
+  });
 }
 
 function removeThreadNote(setThreadNotes, threadId) {
@@ -1467,6 +1495,197 @@ function ThreadNoteBell({ notes, onSelect }) {
   );
 }
 
+// v63 SOURCE CANDIDATE — Welcome Back summary.
+//
+// A deterministic navigation summary, not an AI-generated one. ATLAS presents it; the
+// content is entirely existing Stream Chat data (channel unread counts, thread notes)
+// run through fixed rules. No message bodies, attachments, images, links, rich text,
+// reactions, or file names are ever rendered here, only channel names, unread counts,
+// replier names, and an already-truncated plain-text preview.
+//
+// Real dialog semantics (role, aria-modal, focus trap, Escape, initial focus, focus
+// restore) are implemented directly here since no accessible dialog pattern exists
+// elsewhere in this codebase to reuse, and adding a dependency for one dialog isn't
+// warranted.
+function WelcomeBackSummary({ recap, firstName, onSelectChannel, onSelectThread, onDismiss, isMobile }) {
+  const dialogRef = useRef(null);
+  const closeButtonRef = useRef(null);
+  const previouslyFocusedRef = useRef(null);
+  const [imgFailed, setImgFailed] = useState(false);
+
+  useEffect(() => {
+    previouslyFocusedRef.current = document.activeElement;
+    if (closeButtonRef.current) closeButtonRef.current.focus();
+    return () => {
+      if (previouslyFocusedRef.current && previouslyFocusedRef.current.focus) {
+        try { previouslyFocusedRef.current.focus(); } catch (e) {}
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onDismiss();
+        return;
+      }
+      if (e.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = dialogRef.current.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onDismiss]);
+
+  const totalUnread = recap.channelItems.reduce((sum, item) => sum + item.unreadCount, 0);
+  const channelCount = recap.channelItems.length;
+  const threadCount = recap.threadItems.length;
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1150, fontFamily: "'DM Sans', sans-serif", padding: 16 }}
+      onClick={onDismiss}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="welcome-back-heading"
+        onClick={e => e.stopPropagation()}
+        style={{ background: '#fff', borderRadius: 16, padding: isMobile ? '22px 22px 22px' : '26px 28px 24px', width: isMobile ? 440 : 520, maxWidth: '92vw', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', position: 'relative' }}
+      >
+        <button
+          ref={closeButtonRef}
+          onClick={onDismiss}
+          aria-label="Close"
+          title="Close"
+          style={{ position: 'absolute', top: 12, right: 14, background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#aaa', lineHeight: 1, padding: 4, zIndex: 2 }}
+        >
+          ×
+        </button>
+
+        {/* Guide header. ATLAS speaks from the left; on desktop his hero image is
+            anchored to the right so the raised arm points back toward the message.
+            On mobile the arrangement stacks with the image centered on top. The
+            transparent asset sits directly on the dialog, not inside an icon box. */}
+        <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: 'center', gap: isMobile ? 4 : 6, marginBottom: 18 }}>
+          <div style={{ order: isMobile ? 2 : 1, flex: 1, minWidth: 0, textAlign: isMobile ? 'center' : 'left' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#3a55d9', letterSpacing: '0.09em', textTransform: 'uppercase', marginBottom: 6 }}>
+              {ASSISTANT_CONFIG.name}
+            </div>
+            <div id="welcome-back-heading" style={{ fontSize: 20, fontWeight: 700, color: '#1a1a1a', lineHeight: 1.25, marginBottom: 8 }}>
+              {ASSISTANT_CONFIG.welcomeBackGreeting(firstName)}
+            </div>
+            <div style={{ fontSize: 13.5, color: '#555', lineHeight: 1.55 }}>
+              {ASSISTANT_CONFIG.welcomeBackIntro}
+            </div>
+          </div>
+          {/* Desktop: ATLAS is enlarged and leans into the hero area (negative left
+              margin) so his raised arm reaches toward the welcome copy, reading as a
+              present guide rather than an icon parked in empty space. Mobile size is
+              unchanged. */}
+          <div style={{ order: isMobile ? 1 : 2, width: isMobile ? 132 : 188, flexShrink: 0, marginLeft: isMobile ? 0 : -14, marginRight: isMobile ? 0 : -4, marginBottom: isMobile ? 0 : -2 }}>
+            {!imgFailed ? (
+              <img
+                src={ASSISTANT_CONFIG.heroImageSrc}
+                alt={ASSISTANT_CONFIG.heroImageAlt}
+                onError={() => setImgFailed(true)}
+                style={{ width: '100%', height: 'auto', objectFit: 'contain', display: 'block' }}
+              />
+            ) : (
+              <div style={{ width: '100%', paddingBottom: '100%', borderRadius: '50%', background: '#f1f4fe' }} aria-hidden="true" />
+            )}
+          </div>
+        </div>
+
+        {/* Recap body. v63 intentionally ships exactly two activity sections: unread
+            channel messages, then unread thread replies. Each is a self-contained,
+            independently-conditional block, so v63.1 sections (New from Mark, org
+            announcements, release notes, new features, resources, upcoming events,
+            recommended next steps) slot in here as sibling blocks between the activity
+            sections and the "Continue to chat" action, without restructuring this
+            component. No section framework is abstracted ahead of that need. */}
+        {channelCount > 0 && (
+          <div style={{ fontSize: 12.5, color: '#555', marginBottom: 8 }}>
+            <strong>{totalUnread}</strong> unread {totalUnread === 1 ? 'message' : 'messages'} across <strong>{channelCount}</strong> {channelCount === 1 ? 'channel' : 'channels'}
+          </div>
+        )}
+        {threadCount > 0 && (
+          <div style={{ fontSize: 12.5, color: '#555', marginBottom: 16 }}>
+            <strong>{threadCount}</strong> {threadCount === 1 ? 'reply' : 'replies'} in {threadCount === 1 ? 'a thread' : 'threads'} you started
+          </div>
+        )}
+
+        {channelCount > 0 && (
+          <div style={{ marginBottom: threadCount > 0 ? 14 : 4 }}>
+            {recap.channelItems.map(item => (
+              <button
+                key={item.channelId}
+                onClick={() => onSelectChannel(item.channelId)}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '9px 12px', marginBottom: 4, border: '1px solid #eef0f5', background: '#fafbfd', borderRadius: 9, cursor: 'pointer', textAlign: 'left', fontFamily: "'DM Sans', sans-serif" }}
+              >
+                <span style={{ fontSize: 13, color: '#181b26', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {item.channelName}
+                </span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#3a55d9', background: '#eef1fd', borderRadius: 10, padding: '2px 8px', flexShrink: 0, marginLeft: 8 }}>
+                  {item.unreadCount > 99 ? '99+' : item.unreadCount}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {threadCount > 0 && (
+          <div style={{ marginBottom: 6 }}>
+            {recap.threadItems.map(item => {
+              const chDef = ALL_CHANNELS.find(c => c.id === item.channelId);
+              const preview = item.preview.length > 60 ? item.preview.slice(0, 60) + '…' : item.preview;
+              return (
+                <button
+                  key={item.threadId}
+                  onClick={() => onSelectThread(item)}
+                  style={{ display: 'block', width: '100%', padding: '9px 12px', marginBottom: 4, border: '1px solid #eef0f5', background: '#fafbfd', borderRadius: 9, cursor: 'pointer', textAlign: 'left', fontFamily: "'DM Sans', sans-serif" }}
+                >
+                  <div style={{ fontSize: 12.5, fontWeight: 600, color: '#181b26' }}>
+                    {item.replierName} replied {chDef ? `in ${chDef.name}` : ''}
+                  </div>
+                  {preview && (
+                    <div style={{ fontSize: 11.5, color: '#969cac', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {preview}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* v63.1 SECTION INSERTION POINT — future non-activity sections render here,
+            as sibling blocks above the Continue action. Not implemented in v63. */}
+
+        <button
+          onClick={onDismiss}
+          style={{ width: '100%', padding: '11px', marginTop: 8, fontSize: 13, fontWeight: 600, background: 'linear-gradient(135deg,#3a55d9,#2f44b8)', color: '#fff', border: 'none', borderRadius: 10, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}
+        >
+          Continue to chat
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [chatClient, setChatClient] = useState(null);
   const [channelMap, setChannelMap] = useState({});
@@ -1481,11 +1700,21 @@ function App() {
   const [rosterMembers, setRosterMembers] = useState([]);
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth <= 768 : false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  // v62 SOURCE CANDIDATE — thread reply notifications.
-  // Not built, tested, committed, pushed, or deployed.
+  // Thread reply notifications (v62), live in production.
   const [threadNotes, setThreadNotes] = useState({});
   const [pendingThread, setPendingThread] = useState(null);
   const [openThreadId, setOpenThreadId] = useState(null);
+  // v63 SOURCE CANDIDATE — Welcome Back summary.
+  // Two independent "is this data ready" signals the recap waits on before it may ever
+  // appear. Both fail open (set true even on failure) so a broken data source degrades
+  // the recap rather than blocking chat entirely.
+  const [channelUnreadReady, setChannelUnreadReady] = useState(false);
+  const [threadRecoveryReady, setThreadRecoveryReady] = useState(false);
+  const [showWelcomeBack, setShowWelcomeBack] = useState(false);
+  useEffect(() => {
+    window.__catsWBTrace = window.__catsWBTrace || [];
+    window.__catsWBTrace.push({ t: Date.now(), showWelcomeBack });
+  }, [showWelcomeBack]);
   const clientRef = useRef(null);
   const activeIdRef = useRef(activeId);
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
@@ -1500,6 +1729,19 @@ function App() {
   useEffect(() => {
     threadNotesRef.current = threadNotes;
   }, [threadNotes]);
+
+  // v63 SOURCE CANDIDATE — Welcome Back summary.
+  // Snapshots currentUser.welcomed the FIRST time currentUser is known this page load,
+  // before dismissWelcome() could flip it to true later in this same session. Read-only
+  // use of the existing flag; does not change how or when it's written. This is what
+  // stops a brand-new user from being told "welcome back" moments after finishing their
+  // first WelcomeCard in the same visit.
+  const wasReturningUserRef = useRef(null);
+  useEffect(() => {
+    if (wasReturningUserRef.current === null && currentUser) {
+      wasReturningUserRef.current = !!currentUser.welcomed;
+    }
+  }, [currentUser]);
 
   const threadListenersRef = useRef([]);
 
@@ -1631,6 +1873,9 @@ function App() {
       } catch (e) {
         // if read state isn't available, fall back to live-only counting
       }
+      // v63 SOURCE CANDIDATE: channel unread data has reached a known state (success or
+      // fallback) either way, so the Welcome Back recap may now safely read unreadCounts.
+      setChannelUnreadReady(true);
 
       const detectAndAlert = (event, channelLabelMap) => {
         const chId = event.channel_id || event.cid?.replace('messaging:', '');
@@ -1759,6 +2004,9 @@ function App() {
             replierName: reply.user?.name || 'Someone',
             replierId,
             preview: (reply.text || '').slice(0, 120),
+            // v63 SOURCE CANDIDATE: the reply's own message id, used as the stable
+            // identity anchor for the Welcome Back recap signature (not display data).
+            latestReplyId: reply.id || null,
             createdAt:
               reply.created_at ||
               new Date().toISOString(),
@@ -1879,6 +2127,8 @@ function App() {
                 0,
                 120
               ),
+              // v63 SOURCE CANDIDATE: same identity anchor as the live-event path above.
+              latestReplyId: lastReply?.id || null,
               createdAt:
                 state.updatedAt ||
                 new Date().toISOString(),
@@ -1893,7 +2143,11 @@ function App() {
         }
       };
 
-      reconcileThreads('initial-connect');
+      // v63 SOURCE CANDIDATE: reconcileThreads is intentionally not awaited here (matches
+      // the existing fire-and-forget v62 behavior), but .finally() marks thread recovery
+      // "settled" either way so the Welcome Back recap knows when it may safely read
+      // threadNotes, without ever blocking the rest of connectChat or the chat UI on it.
+      reconcileThreads('initial-connect').finally(() => setThreadRecoveryReady(true));
 
       const recoveredSubscription = client.on(
         'connection.recovered',
@@ -1955,6 +2209,142 @@ function App() {
       channelId: note.channelId,
       threadId: note.threadId,
     });
+  }
+
+  // v63 SOURCE CANDIDATE — Welcome Back summary.
+  //
+  // The recap is derived entirely from state v62 already maintains: unreadCounts (seeded
+  // from channel.countUnread() in connectChat) and threadNotes (populated by the live
+  // notification.thread_message_new handler and by queryThreads({ watch: false })
+  // reconciliation). No parallel unread-tracking system, no additional Stream queries, no
+  // additional channel ever watched.
+  //
+  // Empirically verified during v63 planning: channel.countUnread() does NOT include
+  // thread replies (tested directly against a live throwaway channel: the count did not
+  // move when a thread reply was added on top of an existing unread top-level message).
+  // Channel-unread and thread-unread are disjoint counting domains, so they are presented
+  // as two separate categories below, never summed into one implied-unique total.
+  function computeWelcomeBackRecap() {
+    const channelItems = Object.keys(unreadCounts)
+      .filter(id => unreadCounts[id] > 0)
+      .map(id => {
+        const chDef = ALL_CHANNELS.find(c => c.id === id);
+        const ch = channelMap[id];
+        if (!chDef || !ch) return null; // missing channel name / no longer accessible: skip
+        const msgs = (ch.state && ch.state.latestMessages) || [];
+        const latest = msgs.length ? msgs[msgs.length - 1] : null;
+        return {
+          channelId: id,
+          channelName: chDef.name,
+          unreadCount: unreadCounts[id],
+          // The latest message ID in a channel with unreadCount > 0 is reliably part of
+          // that unread window: countUnread() counts messages with created_at after the
+          // user's read cursor, and the newest message is always at or after that cursor
+          // whenever the count is nonzero. Used as recap identity, not display data.
+          latestRelevantMessageId: latest ? latest.id : null,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.channelId.localeCompare(b.channelId));
+
+    const threadItems = Object.values(threadNotes)
+      .map(note => ({
+        threadId: note.threadId,
+        channelId: note.channelId,
+        replierName: note.replierName || 'Someone',
+        preview: note.preview || '',
+        latestReplyId: note.latestReplyId || null,
+      }))
+      .sort((a, b) => a.threadId.localeCompare(b.threadId));
+
+    return { channelItems, threadItems };
+  }
+
+  const WELCOME_BACK_ACK_KEY = 'cats_welcome_back_ack';
+
+  function readAcknowledgedRecap() {
+    try {
+      const raw = sessionStorage.getItem(WELCOME_BACK_ACK_KEY);
+      if (!raw) return { channels: {}, threads: {} };
+      const parsed = JSON.parse(raw);
+      return { channels: parsed.channels || {}, threads: parsed.threads || {} };
+    } catch (e) {
+      return { channels: {}, threads: {} }; // sessionStorage unavailable/throws: fail open
+    }
+  }
+
+  function writeAcknowledgedRecap(recap) {
+    try {
+      const channels = {};
+      recap.channelItems.forEach(item => { channels[item.channelId] = item.latestRelevantMessageId; });
+      const threads = {};
+      recap.threadItems.forEach(item => { threads[item.threadId] = item.latestReplyId; });
+      // Sorted keys so the stored record is deterministic regardless of iteration order.
+      const sortedChannels = {};
+      Object.keys(channels).sort().forEach(k => { sortedChannels[k] = channels[k]; });
+      const sortedThreads = {};
+      Object.keys(threads).sort().forEach(k => { sortedThreads[k] = threads[k]; });
+      sessionStorage.setItem(WELCOME_BACK_ACK_KEY, JSON.stringify({ channels: sortedChannels, threads: sortedThreads }));
+    } catch (e) {
+      // sessionStorage unavailable/throws: fail open. Worst case the recap may reappear
+      // more than ideal this session; it never breaks chat.
+    }
+  }
+
+  // Signature inequality alone is not enough: reading one item shrinks the recap, and
+  // that must NOT reopen the dialog. Only a genuinely new channel message id or thread
+  // reply id not present in the last acknowledged recap counts as new activity.
+  function recapHasNewActivity(recap, acknowledged) {
+    const newChannelActivity = recap.channelItems.some(item => (
+      !item.latestRelevantMessageId || acknowledged.channels[item.channelId] !== item.latestRelevantMessageId
+    ));
+    if (newChannelActivity) return true;
+    return recap.threadItems.some(item => (
+      !item.latestReplyId || acknowledged.threads[item.threadId] !== item.latestReplyId
+    ));
+  }
+
+  const [welcomeBackRecap, setWelcomeBackRecap] = useState(null);
+
+  useEffect(() => {
+    if (!chatClient || !currentUser || showProfileForm) return;
+    if (!channelUnreadReady || !threadRecoveryReady) return;
+    if (wasReturningUserRef.current !== true) return; // brand-new user this session: never show
+    if (showWelcomeBack) return;
+
+    let recap;
+    try {
+      recap = computeWelcomeBackRecap();
+    } catch (e) {
+      console.warn('[CATS WELCOME BACK DIAG] recap computation failed', e.message);
+      return; // fail open: recap skipped, chat unaffected
+    }
+
+    if (!recap.channelItems.length && !recap.threadItems.length) return; // no empty recap
+
+    const acknowledged = readAcknowledgedRecap();
+    if (!recapHasNewActivity(recap, acknowledged)) return;
+
+    setWelcomeBackRecap(recap);
+    // Acknowledge at presentation time (covers both "dismissed" and "opened an item"),
+    // so the remaining, now-smaller recap never reopens the dialog on its own.
+    writeAcknowledgedRecap(recap);
+    setShowWelcomeBack(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatClient, currentUser, showProfileForm, channelUnreadReady, threadRecoveryReady, unreadCounts, channelMap, threadNotes, showWelcomeBack]);
+
+  function dismissWelcomeBack() {
+    setShowWelcomeBack(false);
+  }
+
+  function handleWelcomeBackChannelClick(channelId) {
+    setShowWelcomeBack(false);
+    handleChannelSelect(channelId);
+  }
+
+  function handleWelcomeBackThreadClick(threadItem) {
+    setShowWelcomeBack(false);
+    handleThreadNoteClick({ channelId: threadItem.channelId, threadId: threadItem.threadId });
   }
 
   useEffect(() => {
@@ -2078,6 +2468,16 @@ function App() {
   return (
     <div style={{ display: 'flex', height: isMobile ? '100dvh' : '100vh', minHeight: isMobile ? '100dvh' : undefined, fontFamily: "'DM Sans', sans-serif", background: 'radial-gradient(1200px 600px at 80% -10%, #eef1f8 0%, rgba(238,241,248,0) 60%), #e7e9f1', padding: isMobile ? 0 : 14, overflow: 'hidden' }}>
       {showWelcome && <WelcomeCard name={currentUser?.name} onOpenGuide={() => dismissWelcome(true)} onDismiss={() => dismissWelcome(false)} />}
+      {showWelcomeBack && welcomeBackRecap && (
+        <WelcomeBackSummary
+          recap={welcomeBackRecap}
+          firstName={(currentUser?.name || '').split(' ')[0]}
+          onSelectChannel={handleWelcomeBackChannelClick}
+          onSelectThread={handleWelcomeBackThreadClick}
+          onDismiss={dismissWelcomeBack}
+          isMobile={isMobile}
+        />
+      )}
       <div style={{ display: 'flex', flex: 1, background: '#fff', borderRadius: isMobile ? 0 : 18, boxShadow: isMobile ? 'none' : '0 24px 60px rgba(24,27,38,0.14)', overflow: 'hidden', border: isMobile ? 'none' : '1px solid rgba(255,255,255,0.6)', minHeight: 0 }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap');
