@@ -683,6 +683,111 @@ recovery.
   `?channel=<test-landing-channel>`. This is how the final v63 QA was run: production
   channels were never queried, membered, watched, seeded, or read.
 
+**Superseded by tooling.** The rules above are now enforced in code by the QA Safety
+Guardrails (next section), which is the required mechanism rather than a convention.
+
+## QA SAFETY GUARDRAILS (required for all QA work)
+
+Built directly in response to the v63 truncation incident above, on branch
+`qa-safety-guardrails`. A fully separate Stream QA application was considered and explicitly
+rejected as disproportionate at this scale; this is the accepted alternative.
+
+**What it is, and what it is NOT.** This is a **policy and code-enforced boundary, not a
+Stream-enforced environment boundary.** QA fixtures live inside the same production Stream
+application. Unlike a separate Stream app, where credentials for one app cannot reach the
+other, this depends on every QA script actually using the guard, on QA channels staying out
+of the production configuration, on QA channel membership staying limited to the fixture
+users, and on nobody adding an unguarded one-off mutation script later. **Do not describe
+this as physical or environment isolation.**
+
+### Shared channel configuration
+
+`src/channelConfig.js` (CommonJS) is the single source of truth for real cohort channel IDs.
+`src/index.jsx` imports it via webpack's ESM/CJS interop; `qa-tools/` `require()`s the same
+file. `package.json` has no `"type"` field, so CommonJS is what lets both runtimes read one
+definition without a duplicated list. It must contain **only** real cohort channels — never a
+`cats-qa-*` entry.
+
+### Production denylist derivation
+
+Derived at runtime from `ALL_PRODUCTION_CHANNEL_IDS`, the **unfiltered** flatten of
+`CHANNEL_GROUPS`. Deliberately includes the static/getting-started channel, which the app's
+own `ALL_CHANNELS` excludes — a denylist omitting it would leave it unprotected. Never
+hand-maintained, and `src/index.jsx` is never parsed as text.
+
+### Fixed fixtures
+
+Users (exactly three, permanent): `cats-qa-user-1`, `cats-qa-user-2`, `cats-qa-user-3`.
+Channels (exactly four, permanent): `cats-qa-general`, `cats-qa-announcements`,
+`cats-qa-module-a`, `cats-qa-module-b`, each carrying stored `qa_only: true` and
+`qa_fixture: true` plus QA-identifying names, with membership of exactly the three fixture
+users. Channels are created by `cats-qa-user-1`, a fixture identity, never a production one.
+
+### Bootstrap ordering and fixture validation
+
+Users are created/validated first; `bootstrapQaChannels()` enforces that itself and aborts if
+the users do not validate. Both bootstraps are create-only and idempotent, and **validate**
+existing fixtures rather than accepting them. A mismatched fixture **fails closed**: reported,
+untouched, never repaired, updated, deleted, truncated, or replaced. Fixing one needs explicit
+product-owner direction.
+
+**There is deliberately no process-local `bootstrapComplete` flag.** Bootstrap and a later
+write may run in different Node processes, where an in-memory flag would not survive and would
+invite an unsafe bypass. Persistent Stream fixture state, revalidated on every write, is the
+authoritative precondition.
+
+### Guard behaviour
+
+`qa-tools/guard.js` is the only sanctioned mutation path for repository-managed QA scripts.
+Check order is **local-first, denylist-first**:
+
+1. production denylist (authoritative) → 2. permitted operation → 3. `cats-qa-` prefix →
+4. exact channel allowlist → 5. declared actor prefix + exact allowlist → 6. payload shape →
+then adapter reads: channel exists → `qa_only === true` → `qa_fixture === true` → membership
+is exactly the three fixture users → (thread replies) parent message lives in that same channel.
+
+Two deliberate strengthenings versus the brief's literal a–f ordering: local checks precede
+any adapter read, so a production ID is refused with **zero** Stream calls (making "no mutation
+invoked, no network write sent" provable via mock counters); and the denylist is checked first
+so it is demonstrably the deciding control rather than being shadowed by the prefix check —
+including against a fixture that falsely claims `qa_only: true` for a production channel ID.
+
+Permitted operations are exactly **`sendQaMessage`** and **`sendQaThreadReply`**. Reactions
+are deliberately excluded until a real QA need arises. Everything else is default-denied. The
+`[QA v63.1]` marker is forced into message text; callers cannot omit it.
+
+Prohibited permanently: `truncate()`, channel/user deletion, hard delete, production updates,
+bulk cleanup, teardown, reset, destructive membership cleanup, generic passthrough. The real
+adapter exposes **no destructive method at all**, so these are unreachable by construction,
+not merely policy-denied. There is no reset or teardown script and none may be added; QA
+fixtures and messages persist. Exceptional cleanup requires product-owner approval and is done
+by a human in the Stream dashboard.
+
+### QA channel invisibility model
+
+QA channels are invisible to the cohort app **by construction**: they are absent from the
+shared production configuration, so the app's channel query (an explicit ID allowlist) can
+never request them, `retainConfiguredChannels()` drops anything unconfigured when building
+`channelMap`, the sidebar renders from `CHANNEL_GROUPS`, unread seeding iterates the live
+production defs, Welcome Back resolves channels through those same defs, deep links are
+validated against the shared predicate, and search is scoped to the active configured channel.
+
+### Client-wide notification limitation (important)
+
+`notification.message_new` and `notification.thread_message_new` are **client-wide listeners,
+not channel-scoped**. Do not claim otherwise. If a real cohort user were ever made a member of
+a QA channel, those events could reach their client. The enforced controls are therefore:
+QA channels excluded from production configuration, **exact QA-only membership**, and display
+and navigation paths constrained to configured production channels. Membership discipline is a
+primary control, not a nicety.
+
+### Verification
+
+`node qa-tools/tests/runTests.js` — isolated guard/bootstrap/invisibility tests; constructs no
+Stream client and makes no network call. `node qa-tools/staticInspect.js` — fails if QA tooling
+reaches the Stream SDK outside `streamAdapter.js`, or if any destructive operation appears in
+`qa-tools/`. The static check is verified to actually detect violations, not just pass.
+
 ## HARD LESSON: never watch all channels (read before touching notifications)
 
 Watching a Stream channel makes you a present watcher. When a message arrives in a channel
@@ -910,3 +1015,31 @@ not go in the wiki.
 - `SETUP.md`: how to rebuild the environment from scratch and the exact deploy steps. NOTE:
  update its `wc -l` sanity figure to 1,586 (it said ~1,100, which was stale since well
  before v59).
+
+### QA Safety Guardrails — acceptance results (observed 2026-07-22)
+
+Isolated suite: **22/22 passed** (`node qa-tools/tests/runTests.js`). Static inspection:
+**PASS**, and separately verified to detect a deliberately-violating probe file (3 findings,
+exit 1) rather than passing vacuously.
+
+Live fixture bootstrap, read back from Stream:
+
+- Users created: `cats-qa-user-1/2/3`, each with `qa_only=true`, `qa_fixture=true`, and name
+  `"QA Fixture User N (not a real member)"`.
+- Channels created: `cats-qa-general`, `cats-qa-announcements`, `cats-qa-module-a`,
+  `cats-qa-module-b`, each with `qa_only=true`, `qa_fixture=true`, and a
+  `"QA — … (QA fixture, not a cohort channel)"` name.
+- Membership on all four: exactly `["cats-qa-user-1","cats-qa-user-2","cats-qa-user-3"]`.
+  No other member on any QA channel.
+- Re-running both bootstraps created nothing and validated all seven fixtures, confirming
+  idempotency with real validation rather than silent acceptance.
+
+Live guarded writes (the only production-app mutations performed, both to a QA fixture
+channel): one message and one thread reply, each stored with the forced `[QA v63.1]` marker.
+The thread reply's parent was verified to live in the same QA channel before dispatch.
+
+Production-denylist, missing/false `qa_only`, misleading-metadata, and destructive-operation
+criteria were exercised **only** through the mock adapter, which reported **zero** adapter
+calls of any kind on every refusal. No production mutation was issued to prove a block.
+
+**No production channel or cohort user was created, read, modified, or deleted at any point.**
