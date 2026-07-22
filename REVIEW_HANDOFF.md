@@ -3,6 +3,29 @@
 Branch: `v63-welcome-back-summary`. Not merged, not deployed. Built on top of v62 (live in
 production). This document is for whoever reviews or merges this PR.
 
+## Final verified metrics
+
+Measured directly on the final commit of this branch (authoritative):
+
+| Metric | Value |
+|---|---|
+| `wc -l src/index.jsx` | **2,667 lines** |
+| `wc -c chat.bundle.js` | **1,843,591 bytes** (~1.76MB) |
+| `git status --short` | clean (no uncommitted changes) |
+| `git diff --stat origin/main...HEAD` | 7 files changed, 794 insertions(+), 16 deletions(-) |
+
+Changed files vs `origin/main`: `src/index.jsx`, `chat.bundle.js`,
+`atlas-hero-transparent.png`, `atlas-hero-white.png`, `PROJECT_KNOWLEDGE.md`,
+`REVIEW_HANDOFF.md`, `TECHNICAL_DEBT.md`.
+
+## Known verification gap (explicit)
+
+**Mention badges and browser notification-sound behavior were not independently re-exercised
+during the final QA pass.** Those code paths are **unchanged by v63** — `detectAndAlert`,
+`fireMentionAlert`, and the `message.new` / `notification.message_new` listeners are untouched
+by this release, so the non-regression assessment is by inspection, not by live re-test. If
+you want belt-and-braces coverage, exercise a mention and a browser chime manually.
+
 ## What this actually does
 
 When a *returning* user (never a brand-new one) connects and has genuinely unread activity,

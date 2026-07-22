@@ -614,8 +614,13 @@ afterward with a hard prefix-guarded hard-delete; `truncate()` was not used anyw
  wired into the dialog.
 - Neither image was compressed or resized; both are large for their small display size
  (see `TECHNICAL_DEBT.md`).
-- Mention badges and browser notification/sound behavior were not independently
- re-exercised live in this pass (unchanged code, same reasoning as the v62 note above).
+- **Known verification gap (explicit):** mention badges and browser notification-sound
+ behavior were **not independently re-exercised** during the final QA pass. **Those code
+ paths are unchanged by v63** — `detectAndAlert`, `fireMentionAlert`, and the
+ `message.new` / `notification.message_new` listeners are untouched by this release, so the
+ assessment is non-regression by inspection rather than by live re-test. Anyone wanting
+ belt-and-braces coverage should exercise a mention and a browser chime manually before or
+ after merge.
 
 **Future migration path (v64):** `ASSISTANT_CONFIG` is designed to become one entry in a
 future per-organization configuration structure without changing any code that reads from
