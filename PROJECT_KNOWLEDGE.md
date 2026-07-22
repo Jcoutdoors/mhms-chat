@@ -1015,3 +1015,31 @@ not go in the wiki.
 - `SETUP.md`: how to rebuild the environment from scratch and the exact deploy steps. NOTE:
  update its `wc -l` sanity figure to 1,586 (it said ~1,100, which was stale since well
  before v59).
+
+### QA Safety Guardrails — acceptance results (observed 2026-07-22)
+
+Isolated suite: **22/22 passed** (`node qa-tools/tests/runTests.js`). Static inspection:
+**PASS**, and separately verified to detect a deliberately-violating probe file (3 findings,
+exit 1) rather than passing vacuously.
+
+Live fixture bootstrap, read back from Stream:
+
+- Users created: `cats-qa-user-1/2/3`, each with `qa_only=true`, `qa_fixture=true`, and name
+  `"QA Fixture User N (not a real member)"`.
+- Channels created: `cats-qa-general`, `cats-qa-announcements`, `cats-qa-module-a`,
+  `cats-qa-module-b`, each with `qa_only=true`, `qa_fixture=true`, and a
+  `"QA — … (QA fixture, not a cohort channel)"` name.
+- Membership on all four: exactly `["cats-qa-user-1","cats-qa-user-2","cats-qa-user-3"]`.
+  No other member on any QA channel.
+- Re-running both bootstraps created nothing and validated all seven fixtures, confirming
+  idempotency with real validation rather than silent acceptance.
+
+Live guarded writes (the only production-app mutations performed, both to a QA fixture
+channel): one message and one thread reply, each stored with the forced `[QA v63.1]` marker.
+The thread reply's parent was verified to live in the same QA channel before dispatch.
+
+Production-denylist, missing/false `qa_only`, misleading-metadata, and destructive-operation
+criteria were exercised **only** through the mock adapter, which reported **zero** adapter
+calls of any kind on every refusal. No production mutation was issued to prove a block.
+
+**No production channel or cohort user was created, read, modified, or deleted at any point.**
