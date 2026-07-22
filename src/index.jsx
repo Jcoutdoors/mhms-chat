@@ -20,6 +20,17 @@ import {
   usePinHandler,
 } from 'stream-chat-react';
 import 'stream-chat-react/dist/css/index.css';
+// Shared production channel configuration. Single source of truth for real cohort channel
+// IDs, also consumed by qa-tools/ so the QA guard's production denylist and the app's
+// channel-loading path can never drift apart. Never contains cats-qa-* channels.
+import {
+  ANNOUNCEMENTS_ID,
+  GETTING_STARTED_ID,
+  STATIC_CHANNELS,
+  CHANNEL_GROUPS,
+  getLiveChannelDefs,
+  retainConfiguredChannels,
+} from './channelConfig';
 
 // Load emoji-mart from CDN at runtime
 let emojiMartPromise = null;
@@ -59,38 +70,9 @@ const APP_CONFIG = {
     time: '6pm MST (7pm CST / 8pm EST / 5pm PST)',
     dates: ['Jun 10', 'Jun 24', 'Jul 8', 'Jul 22', 'Aug 5', 'Aug 19'],
   },
-  channelGroups: [
-    {
-      label: 'Start Here',
-      channels: [
-        { id: 'cats-getting-started', name: '📖 Getting Started' },
-        { id: 'cats-announcements', name: '📣 Announcements' },
-      ],
-    },
-    {
-      label: 'Course Modules',
-      channels: [
-        { id: 'cats-mod-01', name: 'Mod 1 · Development & Neuroscience' },
-        { id: 'cats-mod-02', name: 'Mod 2 · Attachment Theory' },
-        { id: 'cats-mod-03', name: 'Mod 3 · Trauma, ACEs & PTSD' },
-        { id: 'cats-mod-04', name: 'Mod 4 · Therapeutic Presence' },
-        { id: 'cats-mod-05', name: 'Mod 5 · CBT, DBT & ACT' },
-        { id: 'cats-mod-06', name: 'Mod 6 · TF-CBT, EMDR & MI' },
-        { id: 'cats-mod-07', name: 'Mod 7 · Crisis Intervention' },
-        { id: 'cats-mod-08', name: 'Mod 8 · Family Systems' },
-        { id: 'cats-mod-09', name: 'Mod 9 · Identity, Culture & Tech' },
-        { id: 'cats-mod-10', name: 'Mod 10 · Supervised Practice' },
-      ],
-    },
-    {
-      label: 'Community',
-      channels: [
-        { id: 'cats-general', name: 'General' },
-        { id: 'cats-weekly-wins', name: 'Weekly Wins' },
-        { id: 'cats-readings', name: 'Readings & Resources' },
-      ],
-    },
-  ],
+  // Real cohort channel list now lives in ./channelConfig so the app and the QA tooling
+  // share one definition. Never add a cats-qa-* channel to it.
+  channelGroups: CHANNEL_GROUPS,
 };
 
 // v63 SOURCE CANDIDATE.
@@ -134,17 +116,15 @@ function canPostAnnouncements(user) {
   if (typeof user === 'object') return !!user.instructor;
   return false;
 }
-const ANNOUNCEMENTS_ID = 'cats-announcements';
-const GETTING_STARTED_ID = 'cats-getting-started';
-
-// Static channels render as a wiki page, not a Stream chat feed.
-const STATIC_CHANNELS = [GETTING_STARTED_ID];
+// ANNOUNCEMENTS_ID, GETTING_STARTED_ID and STATIC_CHANNELS now come from ./channelConfig
+// (imported above) so the QA tooling and the app share one definition.
 
 // A live registry of member names, kept up to date by the roster fetch.
 // Used to highlight @mentions in rendered messages.
 const memberNameRegistry = { names: [] };
 
-const ALL_CHANNELS = APP_CONFIG.channelGroups.flatMap(g => g.channels).filter(c => !STATIC_CHANNELS.includes(c.id));
+// Same collection as before: every configured channel except the static wiki page.
+const ALL_CHANNELS = getLiveChannelDefs();
 
 // Ask for browser notification permission once.
 function requestNotificationPermission() {
@@ -1815,7 +1795,11 @@ function App() {
           { last_message_at: -1 },
           { watch: false, state: true, presence: false, limit: 30 }
         );
-        queried.forEach(ch => { map[ch.id] = ch; });
+        // The query above is already constrained to an explicit ID allowlist, so in normal
+        // operation this removes nothing. It enforces the same invariant client-side as
+        // defense in depth, and it is the shared helper the QA invisibility tests exercise,
+        // so those tests prove THIS path rather than a parallel copy of the logic.
+        retainConfiguredChannels(queried).forEach(ch => { map[ch.id] = ch; });
       } catch (e) {
         // fall through; we'll at least set up the active channel below
       }
