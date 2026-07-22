@@ -30,6 +30,7 @@ import {
   CHANNEL_GROUPS,
   getLiveChannelDefs,
   retainConfiguredChannels,
+  isConfiguredProductionChannelId,
 } from './channelConfig';
 
 // Load emoji-mart from CDN at runtime
@@ -198,9 +199,14 @@ function getInitialChannelId() {
   try {
     const params = new URLSearchParams(window.location.search);
     const fromParam = params.get('channel');
-    if (fromParam) return fromParam;
+    // Validate the ?channel= param against the shared production configuration, exactly as
+    // the hash path already does. Previously an arbitrary value was returned here and only
+    // neutralized downstream by the ALL_CHANNELS.find() fallback in connectChat; the end
+    // state was the same, but rejecting it at the validation point makes the invariant
+    // explicit and testable rather than incidental.
+    if (fromParam && isConfiguredProductionChannelId(fromParam)) return fromParam;
     const hash = window.location.hash.replace('#', '');
-    if (hash && ALL_CHANNELS.some(c => c.id === hash)) return hash;
+    if (hash && isConfiguredProductionChannelId(hash)) return hash;
   } catch (e) {}
   return 'cats-general';
 }
