@@ -1,7 +1,8 @@
 # v63 Review Handoff — Welcome Back Summary
 
-Branch: `v63-welcome-back-summary`. Not merged, not deployed. Built on top of v62 (live in
-production). This document is for whoever reviews or merges this PR.
+Branch: `v63-welcome-back-summary`. MERGED via PR #2 and LIVE in production as of 2026-07-22
+(merge commit `560429cc6c97e7a3fbeddabd29289263d46259e2`). Built on top of v62 (previously live in
+production). This document is the implementation record for this release.
 
 ## Final verified metrics
 

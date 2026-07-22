@@ -2,9 +2,9 @@
 
 This is the operating manual and current state for the custom community chat built for
 the MHMS / CATS cohort program. This lives in the repo and in the project knowledge so
-any new conversation starts with full context. **Current version: v62 live in production.**
+any new conversation starts with full context. **Current version: v63 live in production.**
 
-**IMPORTANT SOURCE/BUILD STATE (read before building):** The repo is fully at v62, source and
+**IMPORTANT SOURCE/BUILD STATE (read before building):** The repo is fully at v63, source and
 built files both. v61 absorbed the previously-uncommitted v60 work (clickable mailto links +
 two wiki sections), so that gap is closed; nothing is pending re-application. Standing
 notes for the next session:
@@ -22,9 +22,10 @@ notes for the next session:
  LIVE in production as of 2026-07-21. The branch `v62-thread-reply-notifications` still
  exists (not deleted). See the v62 section below for full detail, including a post-deploy
  smoke test against the live site.
-- v63 (Welcome Back Summary) is implemented and QA'd on branch
- `v63-welcome-back-summary`, NOT merged, NOT deployed. Production is still v62. See the
- v63 section below for full detail.
+- v63 (Welcome Back Summary) is **LIVE in production** as of 2026-07-22, merged via PR #2
+ (merge commit `560429cc6c97e7a3fbeddabd29289263d46259e2`). The branch
+ `v63-welcome-back-summary` still exists (not deleted). See the v63 section below for full
+ detail, including the release verification.
 - **READ BEFORE ANY QA:** on 2026-07-22 a QA mistake truncated two REAL production channels
  (`cats-mod-01`, `cats-mod-03`). Impact was accepted by the product owner, recovery is not
  expected. Destructive operations against production channels are now PROHIBITED, `truncate()`
@@ -426,11 +427,30 @@ and the diff was confirmed clean of any proxy or localhost reference.
  present as of the post-deploy smoke test; not investigated further since it did not affect
  verification.
 
-## v63 - Welcome Back Summary (implemented, QA'd, NOT YET MERGED OR DEPLOYED)
+## v63 - Welcome Back Summary (LIVE in production)
 
-**Status:** implemented and QA'd on branch `v63-welcome-back-summary`. Not merged to main,
-not deployed. Production is still v62. `src/index.jsx` is 2,667 lines,
-`chat.bundle.js` is approximately 1.76MB (1,843,591 bytes).
+**Status:** passed architectural and release review, merged via PR #2 (merge commit
+`560429cc6c97e7a3fbeddabd29289263d46259e2`), and **LIVE in production as of 2026-07-22**.
+The branch `v63-welcome-back-summary` still exists, not deleted. `src/index.jsx` is 2,667
+lines, `chat.bundle.js` is 1,843,591 bytes (~1.76MB).
+
+**Release verification.** The GitHub Pages build for the merge commit completed with status
+`built` and no error, and the live bundle at `chat.mentalhealthmadesimple.life` was fetched
+and confirmed **byte-identical** to merged main (1,843,591 bytes). Both ATLAS assets serve
+HTTP 200 at their exact byte sizes. The live bundle was verified to contain the final copy
+("I'm here to help you get oriented. Here's what's happened since your last visit."), the
+`Welcome back, [name].` greeting, the 188px-desktop / 132px-mobile hero sizing, the `ATLAS`
+name constant, the transparent hero path, and the dialog's aria wiring. The production app
+loads with **zero console errors**.
+
+The post-merge smoke test was deliberately **read-only**. The interactive matrix (dialog
+appearance for a returning user, both layouts, channel and thread recap navigation,
+dismissal, Escape, focus behavior, bell, Back button, one-watched-channel) was **not**
+re-exercised against production, because doing so would require creating a production user,
+mutating channel membership, and marking read state. That coverage rests on the full
+pre-merge interactive QA run against isolated test-only channels using the **identical
+build** that is now live (byte-identical bundle). **No production user was created and no
+production channel membership or read state was modified during release verification.**
 
 **What it does:** ATLAS presents a deterministic "welcome back" recap to a *returning* user
 (never a brand-new one) after they connect, summarizing unread channel messages and unread
@@ -821,9 +841,8 @@ Thread reply notifications (both Mark and Jessy asked for this independently) sh
 live in production as of 2026-07-21. See the v62 section above for full detail. No longer on
 this roadmap.
 
-Welcome-back "here's what you missed" summary is implemented and QA'd as v63, on branch
-`v63-welcome-back-summary`, not yet merged or deployed. See the v63 section above for full
-detail. No longer on this roadmap.
+Welcome-back "here's what you missed" summary shipped as v63 and is live in production as of
+2026-07-22. See the v63 section above for full detail. No longer on this roadmap.
 
 Smaller polish, slot in anytime:
 - **Message grouping** - collapse consecutive messages from one person to show name/avatar once. Low effort, visual.
