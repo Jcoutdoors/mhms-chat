@@ -12,11 +12,17 @@ Measured directly on the final commit of this branch (authoritative):
 | `wc -l src/index.jsx` | **2,667 lines** |
 | `wc -c chat.bundle.js` | **1,843,591 bytes** (~1.76MB) |
 | `git status --short` | clean (no uncommitted changes) |
-| `git diff --stat origin/main...HEAD` | 7 files changed, 794 insertions(+), 16 deletions(-) |
+| `git diff --stat origin/main...HEAD` | **7 files changed** (line totals: see note) |
 
 Changed files vs `origin/main`: `src/index.jsx`, `chat.bundle.js`,
 `atlas-hero-transparent.png`, `atlas-hero-white.png`, `PROJECT_KNOWLEDGE.md`,
 `REVIEW_HANDOFF.md`, `TECHNICAL_DEBT.md`.
+
+> Note on the insertion/deletion counts: they are deliberately not pinned to a number here.
+> This file is itself part of the diff, so writing the count into it changes the count —
+> any recorded value is stale the moment it is committed. The stable, meaningful metrics
+> are the source line count, the bundle byte count, and the changed-file list above. Run
+> `git diff --stat origin/main...HEAD` for the live totals at review time.
 
 ## Known verification gap (explicit)
 
