@@ -104,7 +104,8 @@ const ASSISTANT_CONFIG = {
   heroImageSrc: './atlas-hero-transparent.png',
   heroImageFallbackSrc: './atlas-hero-white.png',
   heroImageAlt: 'ATLAS',
-  welcomeBackGreeting: firstName => (firstName ? `Welcome back, ${firstName}` : 'Welcome back'),
+  welcomeBackGreeting: firstName => (firstName ? `Welcome back, ${firstName}.` : 'Welcome back.'),
+  welcomeBackIntro: "I'm here to help you get oriented. Here's a quick look at what you missed.",
 };
 
 function normalizeEmail(email) {
@@ -1506,7 +1507,7 @@ function ThreadNoteBell({ notes, onSelect }) {
 // restore) are implemented directly here since no accessible dialog pattern exists
 // elsewhere in this codebase to reuse, and adding a dependency for one dialog isn't
 // warranted.
-function WelcomeBackSummary({ recap, firstName, onSelectChannel, onSelectThread, onDismiss }) {
+function WelcomeBackSummary({ recap, firstName, onSelectChannel, onSelectThread, onDismiss, isMobile }) {
   const dialogRef = useRef(null);
   const closeButtonRef = useRef(null);
   const previouslyFocusedRef = useRef(null);
@@ -1563,37 +1564,46 @@ function WelcomeBackSummary({ recap, firstName, onSelectChannel, onSelectThread,
         aria-modal="true"
         aria-labelledby="welcome-back-heading"
         onClick={e => e.stopPropagation()}
-        style={{ background: '#fff', borderRadius: 16, padding: '28px 28px 24px', width: 440, maxWidth: '92vw', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}
+        style={{ background: '#fff', borderRadius: 16, padding: isMobile ? '22px 22px 22px' : '26px 28px 24px', width: isMobile ? 440 : 520, maxWidth: '92vw', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', position: 'relative' }}
       >
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div style={{ width: 56, height: 56, flexShrink: 0 }}>
+        <button
+          ref={closeButtonRef}
+          onClick={onDismiss}
+          aria-label="Close"
+          title="Close"
+          style={{ position: 'absolute', top: 12, right: 14, background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#aaa', lineHeight: 1, padding: 4, zIndex: 2 }}
+        >
+          ×
+        </button>
+
+        {/* Guide header. ATLAS speaks from the left; on desktop his hero image is
+            anchored to the right so the raised arm points back toward the message.
+            On mobile the arrangement stacks with the image centered on top. The
+            transparent asset sits directly on the dialog, not inside an icon box. */}
+        <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: 'center', gap: isMobile ? 4 : 18, marginBottom: 18 }}>
+          <div style={{ order: isMobile ? 2 : 1, flex: 1, minWidth: 0, textAlign: isMobile ? 'center' : 'left' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#3a55d9', letterSpacing: '0.09em', textTransform: 'uppercase', marginBottom: 6 }}>
+              {ASSISTANT_CONFIG.name}
+            </div>
+            <div id="welcome-back-heading" style={{ fontSize: 20, fontWeight: 700, color: '#1a1a1a', lineHeight: 1.25, marginBottom: 8 }}>
+              {ASSISTANT_CONFIG.welcomeBackGreeting(firstName)}
+            </div>
+            <div style={{ fontSize: 13.5, color: '#555', lineHeight: 1.55 }}>
+              {ASSISTANT_CONFIG.welcomeBackIntro}
+            </div>
+          </div>
+          <div style={{ order: isMobile ? 1 : 2, width: isMobile ? 132 : 150, flexShrink: 0 }}>
             {!imgFailed ? (
               <img
                 src={ASSISTANT_CONFIG.heroImageSrc}
                 alt={ASSISTANT_CONFIG.heroImageAlt}
                 onError={() => setImgFailed(true)}
-                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                style={{ width: '100%', height: 'auto', objectFit: 'contain', display: 'block' }}
               />
             ) : (
-              <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: '#f1f4fe' }} aria-hidden="true" />
+              <div style={{ width: '100%', paddingBottom: '100%', borderRadius: '50%', background: '#f1f4fe' }} aria-hidden="true" />
             )}
           </div>
-          <button
-            ref={closeButtonRef}
-            onClick={onDismiss}
-            aria-label="Close"
-            title="Close"
-            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#aaa', lineHeight: 1, padding: 4 }}
-          >
-            ×
-          </button>
-        </div>
-
-        <div id="welcome-back-heading" style={{ fontSize: 19, fontWeight: 700, color: '#1a1a1a', marginBottom: 6 }}>
-          {ASSISTANT_CONFIG.welcomeBackGreeting(firstName)}
-        </div>
-        <div style={{ fontSize: 13.5, color: '#666', lineHeight: 1.55, marginBottom: 18 }}>
-          Here's what happened while you were away.
         </div>
 
         {channelCount > 0 && (
@@ -2451,6 +2461,7 @@ function App() {
           onSelectChannel={handleWelcomeBackChannelClick}
           onSelectThread={handleWelcomeBackThreadClick}
           onDismiss={dismissWelcomeBack}
+          isMobile={isMobile}
         />
       )}
       <div style={{ display: 'flex', flex: 1, background: '#fff', borderRadius: isMobile ? 0 : 18, boxShadow: isMobile ? 'none' : '0 24px 60px rgba(24,27,38,0.14)', overflow: 'hidden', border: isMobile ? 'none' : '1px solid rgba(255,255,255,0.6)', minHeight: 0 }}>

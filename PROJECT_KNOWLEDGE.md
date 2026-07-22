@@ -424,7 +424,7 @@ and the diff was confirmed clean of any proxy or localhost reference.
 ## v63 - Welcome Back Summary (implemented, QA'd, NOT YET MERGED OR DEPLOYED)
 
 **Status:** implemented and QA'd on branch `v63-welcome-back-summary`. Not merged to main,
-not deployed. Production is still v62. `src/index.jsx` is 2,642 lines,
+not deployed. Production is still v62. `src/index.jsx` is 2,653 lines,
 `chat.bundle.js` is approximately 1.76MB.
 
 **What it does:** ATLAS presents a deterministic "welcome back" recap to a *returning* user
@@ -434,6 +434,26 @@ thread replies they missed, with direct links to open the relevant channel or th
 existing Stream Chat data run through fixed, deterministic rules. No LLM call, no generated
 prose, no vector search, no embeddings, no server-side summarization is used anywhere in
 this feature.
+
+**Presentation (product-direction refinement, two passes, post-initial-implementation):** the
+dialog is deliberately structured so ATLAS reads as a guide speaking directly to the user,
+not a mascot bolted onto a generic modal. On desktop the dialog widens to 520px and the top
+section is a two-column composition: the left column holds the "ATLAS" label, the greeting
+headline, and an orienting intro line; the right column holds a large (~150px)
+transparent-asset ATLAS hero, sitting directly on the dialog (no icon box), positioned so
+his raised arm points back toward the message, subtly guiding attention to the recap. On
+mobile it stacks instead: the ATLAS hero centered on top (~132px), then the label, headline,
+and intro centered below, then the recap, so the small-screen arrangement stays readable
+without mirroring the desktop side-by-side. "ATLAS" uses the same visual grammar as a chat
+message's sender name (small uppercase label above the message). The greeting and the intro
+line ("I'm here to help you get oriented. Here's a quick look at what you missed.") both come
+from `ASSISTANT_CONFIG`, kept warm and concise, not childish or promotional, and make no
+claim of AI generation or intelligence beyond the deterministic recap that follows. The
+recap counts, per-item actions, and continue button sit below the header at full width,
+unchanged, so scannability of the actual content is preserved. `WelcomeBackSummary` now
+receives `isMobile` to drive the layout switch. Accessibility (dialog role, focus trap with
+correct wraparound, initial focus on the close button, Escape to close) is unchanged and was
+re-verified after the layout change on both desktop and mobile.
 
 **Data sources (no new Stream queries, no parallel unread-tracking system):**
 - Channel recap: the existing `unreadCounts` state (already seeded from
