@@ -48,15 +48,33 @@ itself rather than in anything v63-specific: it's a v62 data-correctness issue t
 stricter identity-comparison logic happened to surface. It's a minimal, additive guard
 (compares `createdAt`); v62's existing behavior is otherwise unchanged.
 
-## Manual test data note
+## Manual test data note — READ THIS
 
-QA was run against the real production Stream backend (there's no dev/sandbox app for this
-project) using `cats-mod-09` as the scratch channel and throwaway test users, all cleaned up
-afterward (channel truncated back to empty, test users hard-deleted). A temporary local CORS
-proxy was used only to get past the token worker's origin allow-list for `localhost`
-during local browser testing; it's deleted, and the production `tokenUrl` is restored in
-this branch's source — confirmed via `git diff` containing zero `localhost` or proxy
-references.
+There is no dev/sandbox Stream app for this project, so QA runs against the real production
+backend. **During an earlier v63 QA round this caused a production incident: test data was
+seeded into `cats-mod-01` and `cats-mod-03` (real channels with real student content) and
+those channels were then cleaned up with `truncate()`, wiping their messages.** Impact was
+limited to already-completed modules, recovery is not expected, and the product owner assessed
+and accepted it. Full detail and the resulting standing rules are in `PROJECT_KNOWLEDGE.md`
+under the incident section.
+
+**The final QA round was re-run entirely against isolated test-only channels.** The approach,
+which is now the required pattern for this repo:
+
+- `APP_CONFIG.channelGroups` was temporarily pointed at an isolated test list
+  (`cats-v63-testonly-general` / `-mod-a` / `-mod-b`) for the local build only, and the app
+  was loaded with `?channel=cats-v63-testonly-general` so even the landing channel was a test
+  channel. Result: **no production channel was queried, membered, watched, seeded, read, or
+  mutated during final QA.**
+- Every seed/teardown script carried a **hard prefix guard** that throws on any channel id not
+  starting with `cats-v63-testonly-`.
+- **`truncate()` was not used anywhere.** Teardown used guarded hard-delete of the test
+  channels plus hard-delete of the throwaway users.
+- A temporary local CORS proxy was used only to get past the token worker's origin allow-list
+  for `localhost`.
+
+All of the above scaffolding is removed from this branch. Confirmed via `git diff` containing
+zero `localhost`, proxy, or `testonly` references, and the real `channelGroups` restored.
 
 ## What to sanity-check on review
 
@@ -66,12 +84,22 @@ references.
 - The white-background hero image (`atlas-hero-white.png`) is present and documented but has
   no automatic runtime fallback wired up in this release — only the transparent version is
   actually used in the dialog.
-- Both image files are large for their display size (1.2–1.6MB, shown at ~56–64px). Left
-  unaltered per explicit instruction not to modify the provided artwork without approval.
-  See `TECHNICAL_DEBT.md`.
+- Both image files are large for their display size (1.2–1.6MB, shown at 188px on desktop and
+  132px on mobile). Left unaltered per explicit instruction not to modify the provided artwork
+  without approval. See `TECHNICAL_DEBT.md`.
+
+## Section structure for v63.1
+
+The dialog body ships exactly two activity sections (unread channels, unread threads), each a
+self-contained conditional block. There is an explicit commented
+`v63.1 SECTION INSERTION POINT` directly above the "Continue to chat" button. v63.1 sections
+(New from Mark, org announcements, release notes, new features, resources, upcoming events,
+recommended next steps) slot in there as sibling blocks. No generic section framework was
+abstracted ahead of that need — the seam is concrete and documented rather than speculative.
 
 ## Not in scope for this PR (intentionally)
 
 No AI/LLM integration of any kind. No v64 visual system or org-level configuration system
 (only the minimal `ASSISTANT_CONFIG` seam). No Worker changes — neither Worker was touched.
-No new dependencies.
+No new dependencies. **None of the v63.1 sections listed above are implemented here** — v63 is
+scoped strictly to unread channel and thread activity.

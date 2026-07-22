@@ -25,6 +25,11 @@ notes for the next session:
 - v63 (Welcome Back Summary) is implemented and QA'd on branch
  `v63-welcome-back-summary`, NOT merged, NOT deployed. Production is still v62. See the
  v63 section below for full detail.
+- **READ BEFORE ANY QA:** on 2026-07-22 a QA mistake truncated two REAL production channels
+ (`cats-mod-01`, `cats-mod-03`). Impact was accepted by the product owner, recovery is not
+ expected. Destructive operations against production channels are now PROHIBITED, `truncate()`
+ is prohibited in QA, and all QA must use isolated test-only channels with a hard prefix guard
+ on any cleanup script. See the incident section below for the full rules.
 
 ---
 
@@ -424,8 +429,8 @@ and the diff was confirmed clean of any proxy or localhost reference.
 ## v63 - Welcome Back Summary (implemented, QA'd, NOT YET MERGED OR DEPLOYED)
 
 **Status:** implemented and QA'd on branch `v63-welcome-back-summary`. Not merged to main,
-not deployed. Production is still v62. `src/index.jsx` is 2,653 lines,
-`chat.bundle.js` is approximately 1.76MB.
+not deployed. Production is still v62. `src/index.jsx` is 2,667 lines,
+`chat.bundle.js` is approximately 1.76MB (1,843,591 bytes).
 
 **What it does:** ATLAS presents a deterministic "welcome back" recap to a *returning* user
 (never a brand-new one) after they connect, summarizing unread channel messages and unread
@@ -435,25 +440,38 @@ existing Stream Chat data run through fixed, deterministic rules. No LLM call, n
 prose, no vector search, no embeddings, no server-side summarization is used anywhere in
 this feature.
 
-**Presentation (product-direction refinement, two passes, post-initial-implementation):** the
+**Presentation (product-direction refinement, three passes, post-initial-implementation):** the
 dialog is deliberately structured so ATLAS reads as a guide speaking directly to the user,
 not a mascot bolted onto a generic modal. On desktop the dialog widens to 520px and the top
 section is a two-column composition: the left column holds the "ATLAS" label, the greeting
-headline, and an orienting intro line; the right column holds a large (~150px)
-transparent-asset ATLAS hero, sitting directly on the dialog (no icon box), positioned so
-his raised arm points back toward the message, subtly guiding attention to the recap. On
-mobile it stacks instead: the ATLAS hero centered on top (~132px), then the label, headline,
-and intro centered below, then the recap, so the small-screen arrangement stays readable
-without mirroring the desktop side-by-side. "ATLAS" uses the same visual grammar as a chat
-message's sender name (small uppercase label above the message). The greeting and the intro
-line ("I'm here to help you get oriented. Here's a quick look at what you missed.") both come
-from `ASSISTANT_CONFIG`, kept warm and concise, not childish or promotional, and make no
-claim of AI generation or intelligence beyond the deterministic recap that follows. The
-recap counts, per-item actions, and continue button sit below the header at full width,
-unchanged, so scannability of the actual content is preserved. `WelcomeBackSummary` now
-receives `isMobile` to drive the layout switch. Accessibility (dialog role, focus trap with
-correct wraparound, initial focus on the close button, Escape to close) is unchanged and was
-re-verified after the layout change on both desktop and mobile.
+headline, and an orienting intro line; the right column holds a large **188px**
+transparent-asset ATLAS hero, sitting directly on the dialog (no icon box). The hero leans
+into the hero area via a small negative left margin so his raised arm reaches toward the
+welcome copy, reading as a present guide rather than an icon parked in unused space. On
+mobile it stacks instead: the ATLAS hero centered on top (132px, deliberately unchanged from
+the previous pass), then the label, headline, and intro centered below, then the recap, so
+the small-screen arrangement stays readable without mirroring the desktop side-by-side.
+"ATLAS" uses the same visual grammar as a chat message's sender name (small uppercase label
+above the message). The greeting and the final intro line ("I'm here to help you get
+oriented. Here's what's happened since your last visit.") both come from `ASSISTANT_CONFIG`,
+kept warm, conversational, and concise, not childish or promotional, and make no claim of AI
+generation or intelligence beyond the deterministic recap that follows. Note the wording is
+"last visit", not "last session". The recap counts, per-item actions, message previews, and
+continue button sit below the header at full width with spacing unchanged, so scannability
+and preview text are fully preserved (the layout is never compressed just to reduce height).
+`WelcomeBackSummary` receives `isMobile` to drive the layout switch. Accessibility (dialog
+role, focus trap with correct wraparound, initial focus on the close button, Escape to close)
+is unchanged and was re-verified after each layout change on both desktop and mobile.
+
+**Section-capable structure (for v63.1):** v63 intentionally ships exactly two activity
+sections, unread channel messages and unread thread replies. Each is a self-contained,
+independently-conditional block, and the component carries an explicit, commented
+`v63.1 SECTION INSERTION POINT` immediately above the "Continue to chat" action. Future
+v63.1 sections (New from Mark, org announcements, release notes, new features, resources,
+upcoming events, recommended next steps) slot in there as sibling blocks without
+restructuring the component. No generic section framework was abstracted ahead of that
+need, deliberately: the seam is concrete and documented rather than speculative. **None of
+those v63.1 sections are implemented in v63.**
 
 **Data sources (no new Stream queries, no parallel unread-tracking system):**
 - Channel recap: the existing `unreadCounts` state (already seeded from
@@ -572,6 +590,24 @@ directly re-verified working alongside v63, on both desktop and mobile. Keyboard
 accessibility verified: initial focus lands on the close button, Tab/Shift+Tab cycles only
 within the dialog and wraps correctly, Escape closes it.
 
+**Final QA pass (isolated test-only channels, post-incident):** after the truncation incident
+above, the entire final QA round was re-run against isolated test-only channels
+(`cats-v63-testonly-general` / `-mod-a` / `-mod-b`) by temporarily pointing
+`APP_CONFIG.channelGroups` at that test list for the local build and loading the app with
+`?channel=cats-v63-testonly-general`. **No production channel was queried, membered, watched,
+seeded, read, or mutated at any point in the final QA.** Re-verified in that isolated
+environment: desktop and mobile Welcome Back rendering, the enlarged 188px desktop ATLAS and
+the final "since your last visit" copy, channel-item navigation (opens the right channel,
+clears its badge), thread-item navigation (opens the right channel *and* the right thread),
+dismissal via both Escape and "Continue to chat" with no spurious reopen, keyboard focus
+behavior, v62 bell/thread-open/`CatsThreadHeader` Back behavior, and the one-watched-channel
+architecture (unchanged code; channel switching behaved correctly throughout). A clean
+single-tab load produced **zero console errors**; transient
+"can't use a channel after client.disconnect()" errors seen mid-round were traced to QA churn
+(deleting test channels underneath a live connection, then force-reloading) and did not
+reproduce on a clean load. All isolated test channels and throwaway users were torn down
+afterward with a hard prefix-guarded hard-delete; `truncate()` was not used anywhere.
+
 **Known limitations:**
 - The white-background hero image is held as documented fallback context but has no
  automatic runtime switch-over path in this release; only the transparent version is
@@ -585,6 +621,42 @@ within the dialog and wraps correctly, Escape closes it.
 future per-organization configuration structure without changing any code that reads from
 it, just swapping where the object comes from (e.g., keyed by org id instead of a single
 module-level constant).
+
+## HARD LESSON / INCIDENT: production channels truncated during v63 QA (2026-07-22)
+
+**What happened.** While seeding data to capture Welcome Back screenshots during v63 QA,
+test messages were injected into `cats-mod-01` ("Mod 1 · Development & Neuroscience") and
+`cats-mod-03` ("Mod 3 · Trauma, ACEs & PTSD"), and those channels were then cleaned up with
+`channel.truncate()`. **Both are real production channels containing real student and
+instructor messages.** Earlier v63 QA had correctly used `cats-mod-09`/`cats-mod-10`, which
+were empty; this round wrongly picked channels holding real content, and the target was not
+checked before the destructive cleanup ran.
+
+**Impact.** `cats-mod-01` (~45 real messages) and `cats-mod-03` (~3 real messages) now return
+zero messages to students. The truncate was soft (no `hard_delete`), so `truncated_at` was set
+and `message_count` still reflects the originals, meaning the rows likely still exist in
+Stream's backend, but the Stream client SDK exposes **no un-truncate/restore method**.
+
+**Resolution.** The affected content was limited and belonged to modules that have already
+been completed. **Recovery is not expected and was not pursued.** The product owner assessed
+and **accepted the impact**, and explicitly chose not to block v63 completion on message
+recovery.
+
+**Standing rules that follow from this (do not relax):**
+- **Never run destructive operations against production channels.** No truncate, no delete,
+  no bulk mutation, ever, on a channel that is part of `APP_CONFIG.channelGroups`.
+- **`truncate()` is prohibited in QA workflows.** It is not a "cleanup" tool here.
+- **All QA must use isolated test-only channels**, ids prefixed `cats-v63-testonly-` (or a
+  similar clearly-isolated prefix), never real cohort channels, not even empty ones.
+- **Any cleanup script must carry a hard prefix guard** that throws and refuses to operate on
+  any channel id lacking the test-only prefix. A guard is required, not optional.
+- **Check the target before deleting.** Query a channel's `message_count` and confirm it is a
+  test-only channel before any destructive call.
+- To QA channel-dependent features without touching production, temporarily point
+  `APP_CONFIG.channelGroups` at an isolated test-only channel list for the local build (the
+  same revert-before-final-build pattern already used for `tokenUrl`), and load the app with
+  `?channel=<test-landing-channel>`. This is how the final v63 QA was run: production
+  channels were never queried, membered, watched, seeded, or read.
 
 ## HARD LESSON: never watch all channels (read before touching notifications)
 
