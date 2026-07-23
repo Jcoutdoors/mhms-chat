@@ -209,9 +209,168 @@ function createFeaturedAckStore({ storage, lookbackDays, now, warn } = {}) {
   };
 }
 
+// ---------------------------------------------------------------------------------------
+// Retrieval processing (v63.1 Commit 2). Pure and deterministic: the isolated tests feed
+// these plain message objects and assert the qualification/ordering/preview outcome. The
+// live Stream query lives in src/index.jsx; these helpers never touch Stream.
+// ---------------------------------------------------------------------------------------
+
+/**
+ * Access-permission boundary for a source channel.
+ *
+ * Being listed in `sourceChannelIds` does NOT by itself prove the current user can access a
+ * channel. The real proof is presence in the loaded channel map, which is populated from
+ * `queryChannels` filtered through `retainConfiguredChannels()` — the same path the rest of
+ * the app relies on, and one that only returns channels the user can actually read.
+ *
+ * If membership state is populated on the loaded channel, require the user to be a member.
+ * If it is not yet populated (connect-time timing), presence in the loaded map is sufficient,
+ * since the channel would not be in that map otherwise.
+ */
+function isChannelAccessibleToUser(channelMap, channelId, userId) {
+  const ch = channelMap && channelMap[channelId];
+  if (!ch) return false;
+  const members = ch.state && ch.state.members;
+  if (members && Object.keys(members).length) {
+    return !!members[userId];
+  }
+  return true;
+}
+
+/** Build the exact channel.search() filter, verified against the installed SDK. */
+function buildFeaturedSearchFilter(authorIds, sinceISO) {
+  return {
+    'user.id': { $in: authorIds },
+    created_at: { $gte: sinceISO },
+    parent_id: { $exists: false },
+  };
+}
+
+/** The ISO threshold for "within the lookback horizon", relative to now (ms). */
+function lookbackThresholdISO(lookbackDays, nowMs) {
+  const t = (typeof nowMs === 'number' ? nowMs : Date.now()) - lookbackDays * DAY_MS;
+  return new Date(t).toISOString();
+}
+
+/**
+ * Does a raw message qualify as a Featured Update?
+ *
+ * All conditions must hold. Author and channel gating happen at retrieval (one query per
+ * source channel, filtered by author server-side), so this focuses on per-message validity:
+ * top-level, non-deleted/shadowed/system, has real text, within the horizon, unacknowledged.
+ *
+ * @param {object} msg              a Stream message object
+ * @param {object} ctx
+ * @param {Set<string>} ctx.authorIdSet   configured author IDs
+ * @param {number} ctx.sinceMs            lookback threshold in ms
+ * @param {(id:string)=>boolean} ctx.isAcknowledged
+ * @param {number} ctx.nowMs
+ */
+function messageQualifies(msg, ctx) {
+  if (!msg || typeof msg !== 'object') return false;
+  if (typeof msg.id !== 'string' || !msg.id) return false;
+  // Top-level only.
+  if (msg.parent_id) return false;
+  // Author must be configured (defense in depth; retrieval already filters by author).
+  const authorId = msg.user && msg.user.id;
+  if (!authorId || !ctx.authorIdSet.has(authorId)) return false;
+  // Not deleted / shadowed / system.
+  if (msg.deleted_at || msg.type === 'deleted') return false;
+  if (msg.shadowed === true) return false;
+  if (msg.type === 'system' || msg.type === 'ephemeral') return false;
+  // Must have real, non-whitespace text. Attachment-only posts (no text) do not qualify;
+  // text-plus-attachment qualifies on its text alone.
+  if (typeof msg.text !== 'string' || !msg.text.trim()) return false;
+  // Within the lookback horizon.
+  const created = Date.parse(msg.created_at);
+  if (isNaN(created) || created < ctx.sinceMs) return false;
+  // Not already acknowledged.
+  if (ctx.isAcknowledged(msg.id)) return false;
+  return true;
+}
+
+/** Collapse whitespace/line breaks and truncate to previewLength; ellipsis only if cut. */
+function makePreview(text, previewLength) {
+  const collapsed = String(text || '').replace(/\s+/g, ' ').trim();
+  if (collapsed.length <= previewLength) return collapsed;
+  return collapsed.slice(0, previewLength).trimEnd() + '…';
+}
+
+/**
+ * Assemble the final Featured Update items from per-channel raw message arrays.
+ *
+ * Merges across sources, keeps only qualifying messages, sorts newest-first, breaks equal
+ * timestamps deterministically by message ID (descending, so it is stable and unambiguous),
+ * and slices to maxItems. Returns lightweight item objects — no attachment metadata.
+ *
+ * @param {Array<{channelId:string, channelName:string, messages:object[]}>} channelResults
+ * @param {object} cfg      validated featuredUpdates config
+ * @param {object} ctx      { isAcknowledged, nowMs }
+ */
+function assembleFeaturedItems(channelResults, cfg, ctx) {
+  const nowMs = typeof ctx.nowMs === 'number' ? ctx.nowMs : Date.now();
+  const sinceMs = nowMs - cfg.lookbackDays * DAY_MS;
+  const authorIdSet = new Set(cfg.authorIds);
+  const qualifyCtx = {
+    authorIdSet,
+    sinceMs,
+    nowMs,
+    isAcknowledged: typeof ctx.isAcknowledged === 'function' ? ctx.isAcknowledged : () => false,
+  };
+
+  const items = [];
+  (channelResults || []).forEach(cr => {
+    (cr.messages || []).forEach(msg => {
+      if (!messageQualifies(msg, qualifyCtx)) return;
+      items.push({
+        messageId: msg.id,
+        channelId: cr.channelId,
+        channelName: cr.channelName,
+        authorId: msg.user.id,
+        authorName: (msg.user && msg.user.name) || 'Mark Mayfield',
+        authorImage: (msg.user && msg.user.image) || null,
+        authorColor: (msg.user && msg.user.color) || null,
+        createdAt: msg.created_at,
+        createdAtMs: Date.parse(msg.created_at),
+        preview: makePreview(msg.text, cfg.previewLength),
+      });
+    });
+  });
+
+  items.sort((a, b) => {
+    if (b.createdAtMs !== a.createdAtMs) return b.createdAtMs - a.createdAtMs; // newest first
+    return b.messageId.localeCompare(a.messageId); // deterministic tie-break by ID
+  });
+
+  return items.slice(0, cfg.maxItems);
+}
+
+/** Concise relative date ("Today", "Yesterday", "N days ago") from an ISO string. */
+function relativeDate(iso, nowMs) {
+  const t = Date.parse(iso);
+  if (isNaN(t)) return '';
+  const now = typeof nowMs === 'number' ? nowMs : Date.now();
+  const startOfDay = ms => {
+    const d = new Date(ms);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  };
+  const days = Math.round((startOfDay(now) - startOfDay(t)) / DAY_MS);
+  if (days <= 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  return `${days} days ago`;
+}
+
 module.exports = {
   FEATURED_ACK_KEY,
   FEATURED_ACK_VERSION,
   validateFeaturedUpdatesConfig,
   createFeaturedAckStore,
+  isChannelAccessibleToUser,
+  buildFeaturedSearchFilter,
+  lookbackThresholdISO,
+  messageQualifies,
+  makePreview,
+  assembleFeaturedItems,
+  relativeDate,
 };

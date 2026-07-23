@@ -32,6 +32,15 @@ import {
   retainConfiguredChannels,
   isConfiguredProductionChannelId,
 } from './channelConfig';
+// v63.1 Featured Updates: deterministic retrieval/processing helpers + acknowledgment store.
+import {
+  validateFeaturedUpdatesConfig,
+  createFeaturedAckStore,
+  isChannelAccessibleToUser,
+  buildFeaturedSearchFilter,
+  assembleFeaturedItems,
+  relativeDate as featuredRelativeDate,
+} from './featuredUpdates';
 
 // Load emoji-mart from CDN at runtime
 let emojiMartPromise = null;
@@ -1712,6 +1721,14 @@ function App() {
   // the recap rather than blocking chat entirely.
   const [channelUnreadReady, setChannelUnreadReady] = useState(false);
   const [threadRecoveryReady, setThreadRecoveryReady] = useState(false);
+  // v63.1 Featured Updates: same settled-state pattern as the two flags above. A failed
+  // retrieval still sets this true (known state reached, "no data") so Welcome Back proceeds
+  // with channel/thread content. featuredItems holds the assembled, unacknowledged-at-
+  // retrieval qualifying items; the ack store (localStorage, or in-memory fallback) persists
+  // which displayed items have been acknowledged.
+  const [featuredUpdatesReady, setFeaturedUpdatesReady] = useState(false);
+  const [featuredItems, setFeaturedItems] = useState([]);
+  const featuredAckStoreRef = useRef(null);
   const [showWelcomeBack, setShowWelcomeBack] = useState(false);
   useEffect(() => {
     window.__catsWBTrace = window.__catsWBTrace || [];
@@ -2163,6 +2180,11 @@ function App() {
       threadListenersRef.current.push(() => {
         recoveredSubscription.unsubscribe();
       });
+
+      // v63.1 Featured Updates retrieval — same fire-and-forget, settle-either-way pattern as
+      // reconcileThreads. `map` here already has membership ensured by the addMembers loop
+      // above, so the access check sees the loaded, member channel.
+      retrieveFeaturedUpdates(client, map, profile).finally(() => setFeaturedUpdatesReady(true));
     } catch (e) {
       setError('Chat error: ' + e.message);
     }
@@ -2217,6 +2239,75 @@ function App() {
     });
   }
 
+  // v63.1 Featured Updates — acknowledgment store accessor.
+  // Created once per page load. Reads window.localStorage; if that access itself throws
+  // (Case B), the store transparently uses an in-memory page-session fallback.
+  function getFeaturedAckStore() {
+    if (!featuredAckStoreRef.current) {
+      let storage = null;
+      try { storage = window.localStorage; } catch (e) { storage = null; }
+      featuredAckStoreRef.current = createFeaturedAckStore({
+        storage,
+        lookbackDays: ASSISTANT_CONFIG.featuredUpdates && ASSISTANT_CONFIG.featuredUpdates.lookbackDays,
+        warn: msg => console.warn('[CATS FEATURED]', msg),
+      });
+    }
+    return featuredAckStoreRef.current;
+  }
+
+  // v63.1 Featured Updates — retrieval. One bounded channel.search() per configured source
+  // channel, filtered server-side by author, 7-day horizon, and top-level-only. Failures are
+  // isolated per channel; a total failure yields an empty list, and the caller always marks
+  // featuredUpdatesReady true afterwards so Welcome Back proceeds with channel/thread content.
+  async function retrieveFeaturedUpdates(client, map, profile) {
+    const cfg = ASSISTANT_CONFIG.featuredUpdates;
+    const check = validateFeaturedUpdatesConfig(cfg, isConfiguredProductionChannelId);
+    if (!check.ok) {
+      if (check.invalid) console.warn('[CATS FEATURED] section disabled, invalid config:', check.reason);
+      setFeaturedItems([]);
+      return;
+    }
+    const store = getFeaturedAckStore();
+    const sinceISO = new Date(Date.now() - cfg.lookbackDays * 24 * 60 * 60 * 1000).toISOString();
+    const filter = buildFeaturedSearchFilter(cfg.authorIds, sinceISO);
+
+    const channelResults = [];
+    for (const channelId of cfg.sourceChannelIds) {
+      // Never widen scope: a source channel must be in the shared production configuration
+      // AND accessible to this user through the loaded channel map (the same path the app
+      // itself uses), not merely listed in sourceChannelIds.
+      if (!isConfiguredProductionChannelId(channelId)) continue;
+      if (!isChannelAccessibleToUser(map, channelId, profile.id)) {
+        console.warn('[CATS FEATURED] source channel not accessible via loaded path, skipping:', channelId);
+        continue;
+      }
+      try {
+        const resp = await map[channelId].search(filter, {
+          limit: cfg.maxItems,
+          sort: [{ created_at: -1 }],
+        });
+        const messages = (resp.results || []).map(r => r.message || r);
+        const chDef = ALL_CHANNELS.find(c => c.id === channelId);
+        channelResults.push({ channelId, channelName: (chDef && chDef.name) || channelId, messages });
+      } catch (e) {
+        // Isolate: this source contributes nothing; the section still assembles from others.
+        console.warn('[CATS FEATURED] source channel query failed, omitting:', channelId, e.message);
+      }
+    }
+
+    let items = [];
+    try {
+      items = assembleFeaturedItems(channelResults, cfg, {
+        isAcknowledged: id => store.isAcknowledged(id),
+        nowMs: Date.now(),
+      });
+    } catch (e) {
+      console.warn('[CATS FEATURED] assembly failed:', e.message);
+      items = [];
+    }
+    setFeaturedItems(items);
+  }
+
   // v63 SOURCE CANDIDATE — Welcome Back summary.
   //
   // The recap is derived entirely from state v62 already maintains: unreadCounts (seeded
@@ -2263,7 +2354,20 @@ function App() {
       }))
       .sort((a, b) => a.threadId.localeCompare(b.threadId));
 
-    return { channelItems, threadItems };
+    // v63.1 Featured Updates: fold in the assembled items, re-filtered against the ack store.
+    // Retrieval already excluded acknowledged items; this second filter is what makes a
+    // dismissal (which acknowledges the displayed set) shrink the recap on the next effect
+    // run, so it cannot reopen with the same featured items — mirroring how channel/thread
+    // acknowledgment prevents the shrink-reopen.
+    let featuredRecapItems = [];
+    try {
+      const store = getFeaturedAckStore();
+      featuredRecapItems = (featuredItems || []).filter(it => !store.isAcknowledged(it.messageId));
+    } catch (e) {
+      featuredRecapItems = [];
+    }
+
+    return { channelItems, threadItems, featuredItems: featuredRecapItems };
   }
 
   const WELCOME_BACK_ACK_KEY = 'cats_welcome_back_ack';
@@ -2305,16 +2409,37 @@ function App() {
       !item.latestRelevantMessageId || acknowledged.channels[item.channelId] !== item.latestRelevantMessageId
     ));
     if (newChannelActivity) return true;
-    return recap.threadItems.some(item => (
+    const newThreadActivity = recap.threadItems.some(item => (
       !item.latestReplyId || acknowledged.threads[item.threadId] !== item.latestReplyId
     ));
+    if (newThreadActivity) return true;
+    // v63.1: recap.featuredItems are already the unacknowledged qualifying set, so any
+    // present item is genuinely new (unacknowledged) Featured Update content. Their own
+    // persistent acknowledgment (localStorage) is what stops them reappearing across
+    // sessions; this simply lets Featured Updates open Welcome Back on their own.
+    return (recap.featuredItems || []).length > 0;
   }
 
   const [welcomeBackRecap, setWelcomeBackRecap] = useState(null);
 
+  // v63.1: acknowledge the Featured Updates actually DISPLAYED in the current dialog, as a
+  // whole, through the single dismissal/close action. Only the displayed (capped) set is
+  // acknowledged — never qualifying-but-undisplayed posts. Called on every close path so
+  // navigating away from an item does not leave it eligible to immediately reopen.
+  function acknowledgeDisplayedFeatured() {
+    try {
+      const shown = welcomeBackRecap && welcomeBackRecap.featuredItems;
+      if (shown && shown.length) {
+        getFeaturedAckStore().acknowledge(shown.map(it => it.messageId));
+      }
+    } catch (e) {
+      console.warn('[CATS FEATURED] acknowledge on close failed', e.message);
+    }
+  }
+
   useEffect(() => {
     if (!chatClient || !currentUser || showProfileForm) return;
-    if (!channelUnreadReady || !threadRecoveryReady) return;
+    if (!channelUnreadReady || !threadRecoveryReady || !featuredUpdatesReady) return;
     if (wasReturningUserRef.current !== true) return; // brand-new user this session: never show
     if (showWelcomeBack) return;
 
@@ -2326,29 +2451,33 @@ function App() {
       return; // fail open: recap skipped, chat unaffected
     }
 
-    if (!recap.channelItems.length && !recap.threadItems.length) return; // no empty recap
+    // Eligibility: channel activity OR thread activity OR at least one Featured Update.
+    if (!recap.channelItems.length && !recap.threadItems.length && !recap.featuredItems.length) return;
 
     const acknowledged = readAcknowledgedRecap();
     if (!recapHasNewActivity(recap, acknowledged)) return;
 
     setWelcomeBackRecap(recap);
-    // Acknowledge at presentation time (covers both "dismissed" and "opened an item"),
-    // so the remaining, now-smaller recap never reopens the dialog on its own.
+    // Channel/thread acknowledgment happens at presentation (unchanged v63 behavior).
+    // Featured Updates are acknowledged separately, on dismissal/close, per their own model.
     writeAcknowledgedRecap(recap);
     setShowWelcomeBack(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatClient, currentUser, showProfileForm, channelUnreadReady, threadRecoveryReady, unreadCounts, channelMap, threadNotes, showWelcomeBack]);
+  }, [chatClient, currentUser, showProfileForm, channelUnreadReady, threadRecoveryReady, featuredUpdatesReady, unreadCounts, channelMap, threadNotes, featuredItems, showWelcomeBack]);
 
   function dismissWelcomeBack() {
+    acknowledgeDisplayedFeatured();
     setShowWelcomeBack(false);
   }
 
   function handleWelcomeBackChannelClick(channelId) {
+    acknowledgeDisplayedFeatured();
     setShowWelcomeBack(false);
     handleChannelSelect(channelId);
   }
 
   function handleWelcomeBackThreadClick(threadItem) {
+    acknowledgeDisplayedFeatured();
     setShowWelcomeBack(false);
     handleThreadNoteClick({ channelId: threadItem.channelId, threadId: threadItem.threadId });
   }
