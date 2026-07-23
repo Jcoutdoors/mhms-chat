@@ -1580,7 +1580,7 @@ function ThreadNoteBell({ notes, onSelect }) {
 // restore) are implemented directly here since no accessible dialog pattern exists
 // elsewhere in this codebase to reuse, and adding a dependency for one dialog isn't
 // warranted.
-function WelcomeBackSummary({ recap, firstName, onSelectChannel, onSelectThread, onDismiss, isMobile }) {
+function WelcomeBackSummary({ recap, firstName, onSelectChannel, onSelectThread, onSelectFeatured, onDismiss, isMobile }) {
   const dialogRef = useRef(null);
   const closeButtonRef = useRef(null);
   const previouslyFocusedRef = useRef(null);
@@ -1625,6 +1625,7 @@ function WelcomeBackSummary({ recap, firstName, onSelectChannel, onSelectThread,
   const totalUnread = recap.channelItems.reduce((sum, item) => sum + item.unreadCount, 0);
   const channelCount = recap.channelItems.length;
   const threadCount = recap.threadItems.length;
+  const featuredItems = recap.featuredItems || [];
 
   return (
     <div
@@ -1745,8 +1746,57 @@ function WelcomeBackSummary({ recap, firstName, onSelectChannel, onSelectThread,
           </div>
         )}
 
-        {/* v63.1 SECTION INSERTION POINT — future non-activity sections render here,
-            as sibling blocks above the Continue action. Not implemented in v63. */}
+        {/* v63.1 SECTION INSERTION POINT — Featured Updates ("New from Mark") renders here,
+            a sibling block above the Continue action, exactly at the documented seam. The
+            heading only renders when there is at least one valid item, so an empty heading
+            never appears. */}
+        {featuredItems.length > 0 && (
+          <div style={{ marginBottom: 6 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#3a55d9', letterSpacing: '0.08em', textTransform: 'uppercase', margin: '4px 0 8px' }}>
+              {ASSISTANT_CONFIG.featuredUpdates.sectionLabel}
+            </div>
+            {featuredItems.map(item => {
+              const rel = featuredRelativeDate(item.createdAt);
+              let exact = '';
+              try { exact = new Date(item.createdAt).toLocaleString(); } catch (e) { exact = ''; }
+              return (
+                <button
+                  key={item.messageId}
+                  onClick={() => onSelectFeatured(item)}
+                  aria-label={`${item.authorName} in ${item.channelName}, ${rel}${exact ? ' (' + exact + ')' : ''}. ${item.preview}. View update.`}
+                  style={{ display: 'block', width: '100%', padding: '9px 12px', marginBottom: 4, border: '1px solid #eef0f5', background: '#fafbfd', borderRadius: 9, cursor: 'pointer', textAlign: 'left', fontFamily: "'DM Sans', sans-serif" }}
+                >
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                    <div style={{ flexShrink: 0, marginTop: 1 }}>
+                      <Avatar name={item.authorName} color={item.authorColor} size={28} image={item.authorImage} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 700, color: '#181b26', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {item.authorName}
+                        </span>
+                        <span title={exact} style={{ fontSize: 11, color: '#969cac', flexShrink: 0 }}>
+                          {rel}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 11, color: '#969cac', margin: '1px 0 2px' }}>
+                        in {item.channelName}
+                      </div>
+                      {item.preview && (
+                        <div style={{ fontSize: 11.5, color: '#686e7e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {item.preview}
+                        </div>
+                      )}
+                      <span aria-hidden="true" style={{ display: 'inline-block', marginTop: 5, fontSize: 11.5, fontWeight: 600, color: '#3a55d9' }}>
+                        View update →
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <button
           onClick={onDismiss}
