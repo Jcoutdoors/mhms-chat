@@ -1,3 +1,75 @@
+# v63.1 Review Handoff — Featured Updates ("New from Mark")
+
+Branch: `v63.1-featured-updates`. NOT merged, NOT deployed. Built on top of v63 (live in
+production) and the QA Safety Guardrails (merge `99c4da39`), which are unchanged by this work.
+
+## What this does
+
+Adds a deterministic "New from Mark" section to the bottom of the v63 Welcome Back dialog,
+listing recent top-level announcement posts by Mark, each clickable to jump to and highlight
+the original message. 100% deterministic — no AI, no summarization, no per-message flag.
+
+## Where to look
+
+Everything is in `src/index.jsx` and the new `src/featuredUpdates.js`. Search
+`v63.1` / `Featured` / `[CATS FEATURED]`.
+
+1. `ASSISTANT_CONFIG.featuredUpdates` (right after the v63 fields) — name/authors/sources/
+   maxItems/previewLength/lookbackDays. Mark's ID `cats-8114d68476d8e833db5ac08a` was resolved
+   live, never hand-typed.
+2. `src/featuredUpdates.js` (CommonJS, like channelConfig.js) — the pure, testable core:
+   `validateFeaturedUpdatesConfig`, `createFeaturedAckStore` (localStorage Case A / Case B +
+   pruning), `isChannelAccessibleToUser`, `buildFeaturedSearchFilter`, `messageQualifies`,
+   `assembleFeaturedItems`, `makePreview`, `relativeDate`.
+3. In `App()`: `retrieveFeaturedUpdates` (one guarded `channel.search()` per source, failure
+   isolated, sets `featuredUpdatesReady` either way), `getFeaturedAckStore`, and the folding
+   of `featuredItems` into `computeWelcomeBackRecap` + eligibility + `acknowledgeDisplayedFeatured`.
+4. `FeaturedUpdateJumpHandler` (right after `ThreadJumpHandler`, its structural model) — the
+   message jump via `useChannelActionContext().jumpToMessage`, plus the "no longer available"
+   path.
+5. `WelcomeBackSummary` — the section renders at the `v63.1 SECTION INSERTION POINT`, above
+   "Continue to chat".
+
+## The two things worth reading closely
+
+**Separate acknowledgment store.** Channels/threads use the v63 `sessionStorage` record
+(untouched). Featured Updates have no Stream-side unread state, so they use a separate
+`localStorage` record `cats_featured_updates_ack` storing only `{messageId: ISO}`. Case A
+(malformed) → treated empty, overwritten on next write. Case B (storage throws) → in-memory
+page-session fallback that intentionally does not survive reload. Pruned past `lookbackDays`.
+Only the displayed set is acknowledged, as a whole, on close.
+
+**Retrieval filter.** `channel.search()` with
+`{ 'user.id': {$in: authorIds}, created_at: {$gte: sinceISO}, parent_id: {$exists:false} }`.
+The `parent_id` clause is required and verified functional — `channel.search()` returns thread
+replies otherwise. `channel.query({messages})` cannot filter by author/date, so it was rejected.
+
+## Three evidence layers (do not blur — see the acceptance results in PROJECT_KNOWLEDGE.md)
+
+- **Layer 1** `node qa-tools/tests/featuredUpdatesTests.js` — 41 isolated tests against the
+  real shared helpers, no Stream calls.
+- **Layer 2** — guarded live QA SDK verification, `cats-qa-*` and `cats-qa-user-1/2/3` only,
+  through the unchanged guard, `[QA v63.1]` marker. Proves SDK behavior only.
+- **Layer 3** — read-only production evidence (Mark ID resolution, `cats-announcements`
+  validation, read-only real-post shape). Production had no qualifying Mark post in the current
+  7-day window, so no live production end-to-end was created; that is proven by L1 + L2.
+
+## Sanity checks for review
+
+- No production content was created; no production channel or user modified. Layer 2 wrote
+  only to `cats-qa-general` via the guard. The four `mhms-*` channels were not touched.
+- QA Safety Guardrails are byte-unchanged (guard, adapter, bootstraps, static inspection).
+- No worker files changed. No secrets in the diff.
+- A temporary in-app preview harness was used for the desktop/mobile visual check and fully
+  reverted — `src/index.jsx` and `chat.bundle.js` are byte-identical to the pre-harness commit.
+
+## Not in scope
+
+No AI/summaries, no Workspace/Notes, no per-message featured controls, no per-item dismissal,
+no live subscription/badge/watcher, no worker changes, no new Stream app, no config weakening.
+
+---
+
 # v63 Review Handoff — Welcome Back Summary
 
 Branch: `v63-welcome-back-summary`. MERGED via PR #2 and LIVE in production as of 2026-07-22
