@@ -1308,6 +1308,68 @@ function ThreadJumpHandler({
   return null;
 }
 
+// v63.1 Featured Updates — message jump handler.
+// Structurally modeled on ThreadJumpHandler: mounted inside <Channel>, driven by a pending
+// navigation object, waits until the requested channel is active, and cleans up on both
+// success and failure. It uses the installed stream-chat-react capability
+// useChannelActionContext().jumpToMessage(messageId), which scrolls the regular message list
+// to the message and highlights it for a moment (highlightedMessageId state + timed clear).
+// This is the first place this app wires up that SDK capability. It changes no read state
+// beyond what the normal channel navigation (handleChannelSelect) already does.
+function FeaturedUpdateJumpHandler({ pendingFeatured, activeId, channel, onDone, onUnavailable }) {
+  const { jumpToMessage } = useChannelActionContext('FeaturedUpdateJumpHandler');
+
+  useEffect(() => {
+    if (!pendingFeatured || !channel || pendingFeatured.channelId !== activeId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    console.log('[CATS FEATURED] jump attempted', {
+      channelId: pendingFeatured.channelId,
+      messageId: pendingFeatured.messageId,
+    });
+
+    (async () => {
+      try {
+        // Items are excluded at assembly if deleted, but the target may have become
+        // unavailable between assembly and this click. Re-confirm it still exists.
+        const resp = await channel.getMessagesById([pendingFeatured.messageId]);
+        const msg = resp && resp.messages && resp.messages[0];
+
+        if (cancelled) return;
+
+        if (!msg || msg.deleted_at || msg.type === 'deleted') {
+          console.warn('[CATS FEATURED] target message unavailable', pendingFeatured.messageId);
+          onUnavailable();
+          return;
+        }
+        if (typeof jumpToMessage !== 'function') {
+          console.warn('[CATS FEATURED] jumpToMessage unavailable in this context');
+          onUnavailable();
+          return;
+        }
+
+        await jumpToMessage(pendingFeatured.messageId);
+
+        if (cancelled) return;
+        onDone();
+      } catch (e) {
+        if (cancelled) return;
+        console.warn('[CATS FEATURED] jump failed', e.message);
+        onUnavailable();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingFeatured, channel, activeId, jumpToMessage, onDone, onUnavailable]);
+
+  return null;
+}
+
 // v62 SOURCE CANDIDATE — correction.
 // Mounted inside <Channel>, alongside ThreadJumpHandler. Stream's own
 // ChannelStateContext.thread is the single central signal for "which thread is
@@ -1715,6 +1777,10 @@ function App() {
   const [threadNotes, setThreadNotes] = useState({});
   const [pendingThread, setPendingThread] = useState(null);
   const [openThreadId, setOpenThreadId] = useState(null);
+  // v63.1 Featured Updates navigation: pending jump target and a transient "no longer
+  // available" notice for a target that vanished between assembly and click.
+  const [pendingFeatured, setPendingFeatured] = useState(null);
+  const [featuredUnavailable, setFeaturedUnavailable] = useState(false);
   // v63 SOURCE CANDIDATE — Welcome Back summary.
   // Two independent "is this data ready" signals the recap waits on before it may ever
   // appear. Both fail open (set true even on failure) so a broken data source degrades
@@ -2482,6 +2548,35 @@ function App() {
     handleThreadNoteClick({ channelId: threadItem.channelId, threadId: threadItem.threadId });
   }
 
+  // v63.1 Featured Updates navigation: activate the correct channel (normal navigation),
+  // then set a pending jump so FeaturedUpdateJumpHandler scrolls to + highlights the post
+  // once the channel is active. Reuses handleChannelSelect; adds no second nav framework.
+  function handleWelcomeBackFeaturedClick(item) {
+    acknowledgeDisplayedFeatured();
+    setShowWelcomeBack(false);
+    setFeaturedUnavailable(false);
+    if (item.channelId !== activeId) {
+      handleChannelSelect(item.channelId);
+    }
+    setPendingFeatured({ channelId: item.channelId, messageId: item.messageId });
+  }
+
+  function handleFeaturedJumpDone() {
+    setPendingFeatured(null);
+  }
+
+  function handleFeaturedJumpUnavailable() {
+    setPendingFeatured(null);
+    setFeaturedUnavailable(true);
+  }
+
+  // Auto-clear the transient "no longer available" notice.
+  useEffect(() => {
+    if (!featuredUnavailable) return;
+    const t = setTimeout(() => setFeaturedUnavailable(false), 4500);
+    return () => clearTimeout(t);
+  }, [featuredUnavailable]);
+
   useEffect(() => {
     if (activeId) {
       setUnreadCounts(prev => ({ ...prev, [activeId]: 0 }));
@@ -2609,9 +2704,20 @@ function App() {
           firstName={(currentUser?.name || '').split(' ')[0]}
           onSelectChannel={handleWelcomeBackChannelClick}
           onSelectThread={handleWelcomeBackThreadClick}
+          onSelectFeatured={handleWelcomeBackFeaturedClick}
           onDismiss={dismissWelcomeBack}
           isMobile={isMobile}
         />
+      )}
+      {/* v63.1: accessible transient notice when a Featured Update target has vanished. */}
+      {featuredUnavailable && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{ position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 1200, background: '#181b26', color: '#fff', fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 500, padding: '10px 18px', borderRadius: 10, boxShadow: '0 8px 24px rgba(24,27,38,0.28)' }}
+        >
+          This update is no longer available.
+        </div>
       )}
       <div style={{ display: 'flex', flex: 1, background: '#fff', borderRadius: isMobile ? 0 : 18, boxShadow: isMobile ? 'none' : '0 24px 60px rgba(24,27,38,0.14)', overflow: 'hidden', border: isMobile ? 'none' : '1px solid rgba(255,255,255,0.6)', minHeight: 0 }}>
       <style>{`
@@ -2789,6 +2895,14 @@ function App() {
                 setOpenThreadId={setOpenThreadId}
                 threadNotesRef={threadNotesRef}
                 channel={activeChannel}
+              />
+
+              <FeaturedUpdateJumpHandler
+                pendingFeatured={pendingFeatured}
+                activeId={activeId}
+                channel={activeChannel}
+                onDone={handleFeaturedJumpDone}
+                onUnavailable={handleFeaturedJumpUnavailable}
               />
             </Channel>
           </Chat>
