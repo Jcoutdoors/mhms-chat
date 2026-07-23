@@ -229,3 +229,59 @@ node qa-tools/staticInspect.js      # fails if QA tooling reaches the SDK outsid
 `staticInspect.js` enforces that direct Stream SDK access exists only in
 `qa-tools/streamAdapter.js`, and that no destructive Stream operation appears anywhere in
 `qa-tools/`. Run both before and after any change to QA tooling.
+
+---
+
+## v63.1 Featured Updates ("New from Mark")
+
+Extends the v63 Welcome Back dialog with a deterministic section surfacing recent top-level
+announcement posts by Mark. Not deployed yet (branch `v63.1-featured-updates`). Full detail
+in `PROJECT_KNOWLEDGE.md`; this is the operational summary.
+
+### Configuration
+
+`ASSISTANT_CONFIG.featuredUpdates` in `src/index.jsx`:
+
+- `enabled: true`
+- `sectionLabel: 'New from Mark'`
+- `authorIds: ['cats-8114d68476d8e833db5ac08a']` — Mark's Stream ID, resolved live from
+  `dr.mark.mayfield@gmail.com`, never hand-typed. Array shape is for future portability.
+- `sourceChannelIds: ['cats-announcements']` — must be a channel in `src/channelConfig.js`.
+- `maxItems: 3`, `previewLength: 60`, `lookbackDays: 7`
+
+Invalid config (bad enabled, empty/malformed authors or sources, a source outside the shared
+production configuration, `maxItems` outside 1–10, invalid preview/lookback) disables ONLY
+the section and logs a sanitized warning. `maxItems` is never silently clamped.
+
+### Retrieval horizon
+
+There is no reliable per-user "last visit" timestamp in this app, so `lookbackDays` (7) is
+the permanent retrieval window. Retrieval is one `channel.search()` per source channel,
+filtered by author, the 7-day threshold, and `parent_id: { $exists: false }` (top-level
+only — required, since `channel.search()` returns thread replies otherwise).
+
+### Acknowledgment
+
+Featured Updates use a SEPARATE `localStorage` record, key `cats_featured_updates_ack`,
+storing only `{ messageId: acknowledgedAtISO }` (never content). This is distinct from the
+v63 channel/thread `sessionStorage` record, which is untouched. Only the displayed (capped)
+set is acknowledged, as a whole, on dialog close. Persistence is browser-specific; if
+localStorage is unavailable it degrades to page-session-only (no reload survival) — the
+documented, accepted degradation. No cross-device sync exists.
+
+### Testing (three-layer model — do not blur the layers)
+
+The shipped config (Mark, `cats-announcements`) and the QA guardrails (only `cats-qa-*`,
+`cats-qa-user-1/2/3`) are intentionally disjoint. No single live write exercises both.
+
+- **Layer 1** — `node qa-tools/tests/featuredUpdatesTests.js`: isolated deterministic tests
+  against the real shared helpers (no Stream calls).
+- **Layer 2** — guarded live QA SDK verification, `cats-qa-*` channels and `cats-qa-user-1/2/3`
+  only, through the unchanged QA guard, `[QA v63.1]` marker. Proves SDK behavior, NOT that
+  production accepts QA identifiers.
+- **Layer 3** — read-only production evidence only (Mark ID resolution, `cats-announcements`
+  validation, read-only shape confirmation). Never create production content; never log in as
+  a production user in a way that alters read state.
+
+Do NOT point `featuredUpdates` at QA channels/authors to force a synthetic end-to-end test,
+and do NOT weaken `retainConfiguredChannels()`, the QA guard, or QA fixture membership.
