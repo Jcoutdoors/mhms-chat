@@ -89,6 +89,22 @@ const ASSISTANT_CONFIG = {
   heroImageAlt: 'ATLAS',
   welcomeBackGreeting: firstName => (firstName ? `Welcome back, ${firstName}.` : 'Welcome back.'),
   welcomeBackIntro: "I'm here to help you get oriented. Here's what's happened since your last visit.",
+  // v63.1 Featured Updates: a deterministic "New from Mark" section in the Welcome Back
+  // dialog surfacing recent top-level announcement posts. authorIds/sourceChannelIds are
+  // arrays from the start for future portability, though MHMS uses exactly one of each here.
+  // The Mark ID was resolved live (SHA-256 of dr.mark.mayfield@gmail.com via emailToUserId,
+  // cross-referenced against a real Stream user with instructor=true), never hand-typed.
+  // lookbackDays is the permanent 7-day retrieval horizon — there is no reliable per-user
+  // "last visit" timestamp in this app.
+  featuredUpdates: {
+    enabled: true,
+    sectionLabel: 'New from Mark',
+    authorIds: ['cats-8114d68476d8e833db5ac08a'],
+    sourceChannelIds: ['cats-announcements'],
+    maxItems: 3,
+    previewLength: 60,
+    lookbackDays: 7,
+  },
 };
 
 function normalizeEmail(email) {
