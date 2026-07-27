@@ -235,8 +235,9 @@ node qa-tools/staticInspect.js      # fails if QA tooling reaches the SDK outsid
 ## v63.1 Featured Updates ("New from Mark")
 
 Extends the v63 Welcome Back dialog with a deterministic section surfacing recent top-level
-announcement posts by Mark. Not deployed yet (branch `v63.1-featured-updates`). Full detail
-in `PROJECT_KNOWLEDGE.md`; this is the operational summary.
+announcement posts by Mark. Merged and deployed from `main` on July 27, 2026 (merge commit
+`40f34e46edac19e8f0bacc269a0eb52200b3f753`). Full detail in `PROJECT_KNOWLEDGE.md`; this is
+the operational summary.
 
 ### Configuration
 

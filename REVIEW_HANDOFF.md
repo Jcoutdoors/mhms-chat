@@ -1,7 +1,23 @@
 # v63.1 Review Handoff — Featured Updates ("New from Mark")
 
-Branch: `v63.1-featured-updates`. NOT merged, NOT deployed. Built on top of v63 (live in
-production) and the QA Safety Guardrails (merge `99c4da39`), which are unchanged by this work.
+Branch: `v63.1-featured-updates`. MERGED via PR #4 and LIVE in production as of 2026-07-27
+(merge commit `40f34e46edac19e8f0bacc269a0eb52200b3f753`). Built on top of v63 (previously live
+in production) and the QA Safety Guardrails (merge `99c4da39`), which are unchanged by this work.
+
+## Final verified metrics
+
+| Metric | Value |
+|---|---|
+| `wc -l src/index.jsx` | **2,966 lines** |
+| `wc -c chat.bundle.js` | **1,857,012 bytes** (~1.77MB) |
+| merge commit | **`40f34e46edac19e8f0bacc269a0eb52200b3f753`** |
+| GitHub Pages deploy | completed 2026-07-27T19:25:22Z (auto, source commit = merged `main`) |
+| live bundle | confirmed **byte-identical** to merged `main` (sha256 `09380247…3961`) |
+| changed files vs pre-v63.1 `main` | **7 files** (see list below) |
+
+Changed files: `src/index.jsx`, `src/featuredUpdates.js`, `chat.bundle.js`,
+`qa-tools/tests/featuredUpdatesTests.js`, `PROJECT_KNOWLEDGE.md`, `SETUP.md`,
+`REVIEW_HANDOFF.md`. No Worker files and no QA Safety Guardrail implementation files changed.
 
 ## What this does
 

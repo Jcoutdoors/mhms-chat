@@ -27,8 +27,8 @@ notes for the next session:
  `v63-welcome-back-summary` still exists (not deleted). See the v63 section below for full
  detail, including the release verification.
 - v63.1 (Featured Updates: a deterministic "New from Mark" section in the Welcome Back
- dialog) is implemented and QA'd on branch `v63.1-featured-updates`, NOT merged, NOT
- deployed. Production is still v63. See the v63.1 section below for full detail.
+ dialog) is MERGED and LIVE in production as of July 27, 2026 (merge commit
+ `40f34e46edac19e8f0bacc269a0eb52200b3f753`). See the v63.1 section below for full detail.
 - **READ BEFORE ANY QA:** on 2026-07-22 a QA mistake truncated two REAL production channels
  (`cats-mod-01`, `cats-mod-03`). Impact was accepted by the product owner, recovery is not
  expected. Destructive operations against production channels are now PROHIBITED, `truncate()`
@@ -689,10 +689,13 @@ recovery.
 **Superseded by tooling.** The rules above are now enforced in code by the QA Safety
 Guardrails (next section), which is the required mechanism rather than a convention.
 
-## v63.1 - Featured Updates ("New from Mark") (implemented, QA'd, NOT MERGED OR DEPLOYED)
+## v63.1 - Featured Updates ("New from Mark") (MERGED AND LIVE)
 
-**Status:** implemented and QA'd on branch `v63.1-featured-updates`. Not merged, not
-deployed. Production is still v63. It extends the v63 Welcome Back dialog with a
+**Status:** MERGED and LIVE in production as of July 27, 2026 (merge commit
+`40f34e46edac19e8f0bacc269a0eb52200b3f753`; GitHub Pages deploy completed
+2026-07-27T19:25:22Z; live bundle confirmed byte-identical to merged main). Final metrics:
+`src/index.jsx` 2,966 lines, `chat.bundle.js` 1,857,012 bytes. It extends the v63 Welcome
+Back dialog with a
 deterministic "New from Mark" section surfacing recent top-level announcement posts, using
 the `v63.1 SECTION INSERTION POINT` seam that v63 deliberately left for exactly this.
 
