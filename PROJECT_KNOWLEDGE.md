@@ -26,6 +26,9 @@ notes for the next session:
  (merge commit `560429cc6c97e7a3fbeddabd29289263d46259e2`). The branch
  `v63-welcome-back-summary` still exists (not deleted). See the v63 section below for full
  detail, including the release verification.
+- v63.1 (Featured Updates: a deterministic "New from Mark" section in the Welcome Back
+ dialog) is implemented and QA'd on branch `v63.1-featured-updates`, NOT merged, NOT
+ deployed. Production is still v63. See the v63.1 section below for full detail.
 - **READ BEFORE ANY QA:** on 2026-07-22 a QA mistake truncated two REAL production channels
  (`cats-mod-01`, `cats-mod-03`). Impact was accepted by the product owner, recovery is not
  expected. Destructive operations against production channels are now PROHIBITED, `truncate()`
@@ -685,6 +688,134 @@ recovery.
 
 **Superseded by tooling.** The rules above are now enforced in code by the QA Safety
 Guardrails (next section), which is the required mechanism rather than a convention.
+
+## v63.1 - Featured Updates ("New from Mark") (implemented, QA'd, NOT MERGED OR DEPLOYED)
+
+**Status:** implemented and QA'd on branch `v63.1-featured-updates`. Not merged, not
+deployed. Production is still v63. It extends the v63 Welcome Back dialog with a
+deterministic "New from Mark" section surfacing recent top-level announcement posts, using
+the `v63.1 SECTION INSERTION POINT` seam that v63 deliberately left for exactly this.
+
+**What it does.** When a returning user opens Welcome Back, a "New from Mark" section can
+appear at the bottom of the dialog (above "Continue to chat") listing recent top-level posts
+by Mark in the announcements channel, each clickable to jump to and highlight the original
+message. It is 100% deterministic — retrieved from Stream and run through fixed rules. No
+AI, no summarization, no per-message "featured" flag.
+
+**Configuration** lives in `ASSISTANT_CONFIG.featuredUpdates` (`src/index.jsx`):
+`enabled`, `sectionLabel: 'New from Mark'`, `authorIds` (Mark's ID), `sourceChannelIds`
+(`cats-announcements`), `maxItems: 3`, `previewLength: 60`, `lookbackDays: 7`. `authorIds`
+and `sourceChannelIds` are arrays from the start for future portability, though MHMS uses
+exactly one of each. Config is validated (`validateFeaturedUpdatesConfig`); any invalid
+condition (bad enabled, empty/malformed authors or sources, a source outside the shared
+production configuration, `maxItems` outside 1–10 — never silently clamped, invalid
+`previewLength`/`lookbackDays`) disables ONLY the section, never the rest of Welcome Back,
+and logs a sanitized warning. `enabled: false` is a clean off switch, not an error.
+
+**Mark's configured identity:** `cats-8114d68476d8e833db5ac08a`, resolved live during
+pre-implementation (SHA-256 of `dr.mark.mayfield@gmail.com` via the app's `emailToUserId`
+scheme, cross-referenced against a real Stream user with `instructor=true`; exactly one
+"Mark" identity exists, so no ambiguity). Never hand-typed.
+
+**Source channel:** `cats-announcements`, confirmed a configured production channel via the
+shared `src/channelConfig.js`. Orphaned `mhms-*`, QA, and any non-configured channels are
+excluded by construction.
+
+**Retrieval and the 7-day horizon.** One bounded `channel.search()` per configured source
+channel, filtered server-side:
+`{ 'user.id': { $in: authorIds }, created_at: { $gte: sinceISO }, parent_id: { $exists: false } }`,
+`sort: [{ created_at: -1 }]`, `limit: maxItems`. **There is no reliable per-user
+"last visit" timestamp in this app**, so `lookbackDays` (7) is the permanent retrieval
+horizon, not a fallback. The `parent_id: { $exists: false }` clause is REQUIRED, verified
+empirically: `channel.search()` returns thread replies too, and that clause is functional
+(it filters them out) rather than silently ignored. `channel.query({messages})` was rejected
+because it cannot filter by author or date.
+
+**Qualification (deterministic).** A post qualifies when: config valid and enabled; source
+configured and present in the shared production config; source accessible to the user via
+the loaded channel map (not `sourceChannelIds` membership alone — checked with the same
+`retainConfiguredChannels`/loaded-channel path the app uses); author configured; top-level
+(no `parent_id`); within the horizon; not persistently acknowledged; has valid non-empty
+text; not deleted/shadowed/system. Attachment-only posts (no text) do not qualify;
+text-plus-attachment qualifies on its text alone (attachments are never summarized, and
+filenames are never used as previews). Across sources, qualifying posts are merged, sorted
+newest-first, tie-broken deterministically by message ID (descending), and sliced to
+`maxItems`.
+
+**Preview and date.** Preview collapses whitespace/line breaks and truncates to
+`previewLength`, adding an ellipsis only when truncation actually occurs — no AI. A concise
+relative date ("Today"/"Yesterday"/"N days ago") is shown, with the exact date available
+via a `title` attribute and bundled into the item's `aria-label`.
+
+**Per-item acknowledgment (localStorage, separate from channel/thread).** The v63
+channel/thread acknowledgment lives in `sessionStorage` and is correct there because Stream
+maintains real unread state for channels and threads. Featured posts have no server-side
+unread state, so session-only acknowledgment would re-surface the same posts every browser
+restart within the window. Featured Updates therefore get a SEPARATE, narrowly-scoped
+`localStorage` record, key `cats_featured_updates_ack`, shape
+`{ version: 1, acknowledged: { "<messageId>": "<ISO>" } }` — storing only message ID and
+acknowledgment timestamp, never message content, author, or channel data. The existing
+`sessionStorage` channel/thread mechanism is untouched and unmigrated.
+- **Case A (malformed/wrong-shape record):** treated as empty, section keeps working,
+  overwritten with a valid structure on the next successful write.
+- **Case B (localStorage unavailable, or read/write throws):** falls back to an in-memory
+  page-session map. Items are still shown and acknowledged in memory so they do not repeat
+  within the page session. This acknowledgment deliberately does NOT survive reload or
+  browser restart — the documented, accepted degradation.
+- Entries past `lookbackDays` are pruned on load and write.
+
+Only the Featured Updates ACTUALLY DISPLAYED in a given dialog (capped set) are acknowledged,
+as a whole, through the single dismissal/close action — never qualifying-but-undisplayed
+posts, and there is no per-item dismissal. Acknowledgment happens on every close path
+(dismiss, continue, or clicking any item) so navigating away does not leave an item eligible
+to immediately reopen.
+
+**Persistence is browser-specific.** When localStorage works, acknowledgment is per-browser;
+when it does not, it degrades to page-session-only. There is NO cross-device synchronization
+in v63.1 under any circumstance.
+
+**Eligibility and readiness.** Welcome Back opens when there is new channel activity OR new
+thread activity OR at least one unacknowledged qualifying Featured Update — a user may see
+the dialog with Featured Updates as the only new content. `featuredUpdatesReady` follows the
+exact settled-state pattern of `channelUnreadReady`/`threadRecoveryReady`: a failed retrieval
+still sets it true ("no data" is a known state) so the dialog proceeds with channel/thread
+content and simply omits the section. A newly published update does NOT force Welcome Back to
+reopen mid-session; it may appear on the next normal initialization. No live subscription,
+watcher, or badge was added.
+
+**Navigation.** The whole item is one semantic button (visible "View update →" is label
+content, not a nested control). Activation reuses `handleChannelSelect` to open the correct
+channel, then `FeaturedUpdateJumpHandler` — modeled structurally on `ThreadJumpHandler`,
+mounted inside `<Channel>`, pending-state-plus-cleanup — scrolls to and highlights the post
+via the installed `stream-chat-react` `useChannelActionContext().jumpToMessage()` capability
+(confirmed present in the shipped bundle; this is the first time this app wires it up). It
+changes no read state beyond what normal channel navigation already does. If the target
+message has become unavailable between assembly and click, it clears pending state and shows
+a transient accessible `role="status"` notice ("This update is no longer available.") — no
+broken or infinite state, no navigation to an unrelated message.
+
+**Failure isolation.** Invalid config, one source query failing, a Stream timeout, malformed
+message data, a missing avatar (falls back to the existing initials pattern), a missing
+source-channel name (falls back to channel-config metadata), or a navigation failure omit
+only the failed item/section and never break the rest of Welcome Back. Scope never widens on
+failure.
+
+**Three-layer QA evidence model (see the v63.1 acceptance results below and REVIEW_HANDOFF.md).**
+The shipped configuration (Mark's real identity, `cats-announcements`) and the QA Safety
+Guardrails (only `cats-qa-user-1/2/3`, only `cats-qa-*` channels) are intentionally disjoint;
+no single live write satisfies both. Testing is therefore split into three layers that are
+never blurred: **Layer 1** isolated deterministic tests against the real shared helpers;
+**Layer 2** guarded live QA SDK verification through the unchanged guard on `cats-qa-*` only;
+**Layer 3** read-only production evidence (Mark ID resolution, source-channel validation,
+read-only shape confirmation of real posts). Because production had no qualifying Mark post
+within the current 7-day window, no full live production end-to-end Featured Update was (or
+could be) created; that behavior is proven by Layer 1 + Layer 2, not claimed as Layer 3.
+
+**Known limitations.** (1) Featured Update acknowledgment is browser-specific when
+localStorage works and degrades to page-session-only when it does not; no cross-device sync.
+(2) The 7-day horizon is fixed because there is no reliable last-visit timestamp. (3) A very
+recently published update will not reopen an already-open session's dialog; it appears on the
+next initialization. **This feature does NOT use AI-generated summaries.**
 
 ## QA SAFETY GUARDRAILS (required for all QA work)
 
