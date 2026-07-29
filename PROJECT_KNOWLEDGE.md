@@ -894,11 +894,28 @@ server-side identically. Later VIF phases (auth routes, Durable Objects, session
 authority document (above this file).
 
 **Canonical files:** `src/identity.js` (exports `normalizeEmail`, `emailToUserId`),
-`src/identityVectors.js` (golden fixture), `src/identity.test.js` (Node `node:test`). Run:
-`npm run test:identity` (no network / Stream / Cloudflare / email / secrets; exits nonzero on
-failure; CI-suitable). These live alongside the app source but are **not imported by
-`src/index.jsx`**, so the bundle is unaffected; the app keeps its existing inline copies at
-`src/index.jsx:119` (`normalizeEmail`) and `:129` (`emailToUserId`) — the same algorithm.
+`src/identityVectors.js` (golden fixture), `src/identity.test.js` (CJS `require` path) and
+`src/identity.esm.test.mjs` (ESM named-import path). Run: `npm run test:identity` (runs both
+test files; no network / Stream / Cloudflare / email / secrets; exits nonzero on failure;
+CI-suitable). These live alongside the app source but are **not imported by `src/index.jsx`**,
+so the bundle is unaffected; the app keeps its existing inline copies at `src/index.jsx:119`
+(`normalizeEmail`) and `:129` (`emailToUserId`) — the same algorithm.
+
+**Portability model — Resolution A (one physical module, demonstrated, not assumed).**
+The single CommonJS module `src/identity.js` is imported unchanged by all intended
+environments; this was verified empirically, not claimed theoretically:
+- **Node test runner** — `require()` (`src/identity.test.js`, 6/6 pass).
+- **webpack app** — `import { ... }` via babel-loader CJS interop (the same mechanism
+  `src/index.jsx` already uses for `channelConfig.js`/`featuredUpdates.js`; proven with a
+  local non-committed webpack build that imported and executed the module).
+- **Cloudflare Pages Functions / Workers** — `import { ... }`. Cloudflare does **not** load
+  raw CommonJS at runtime; `wrangler` bundles Functions/Workers with **esbuild**, which
+  resolves the CJS named exports. Verified with a local esbuild `--bundle --format=esm`
+  compile that bundled and executed all golden vectors.
+- **Node native ESM** — `import { ... }` (`src/identity.esm.test.mjs`).
+Parity across every path is enforced by the shared golden-vector fixture. (This corrects an
+earlier, imprecise phrasing that a raw CommonJS file "runs unchanged everywhere"; the accurate
+statement is that each environment's loader/bundler imports it via named-import interop.)
 
 **Exact algorithm (must never change):**
 1. Coerce the submitted value to a string, or empty string (`email || ''`).

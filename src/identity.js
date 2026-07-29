@@ -16,10 +16,17 @@
 //   - provider-specific canonicalization / alias consolidation
 //   - domain-specific behavior
 //
-// CommonJS (like channelConfig.js / featuredUpdates.js) so both webpack (ESM
-// interop) and Node's test runner (require) consume one definition. Uses the
-// Web Crypto API (`crypto.subtle`), which is a global in browsers, Cloudflare
-// Workers, and Node 20+, so the same source runs unchanged in all three.
+// One physical CommonJS module (like channelConfig.js / featuredUpdates.js),
+// imported unchanged by every intended environment (all demonstrated by the
+// cross-runtime tests + a local esbuild bundle proof — see PROJECT_KNOWLEDGE.md):
+//   - Node's test runner        via require()                  [src/identity.test.js]
+//   - the webpack app           via `import { ... }`           (babel-loader CJS interop)
+//   - Cloudflare Pages Functions / Workers via `import { ... }` — wrangler bundles them
+//        with esbuild, which resolves the CJS named exports    (NOT raw-CJS at runtime)
+//   - Node's native ESM loader  via `import { ... }`           [src/identity.esm.test.mjs]
+// The runtime primitives used (`crypto.subtle`, `TextEncoder`) are globals in
+// browsers, Cloudflare Workers, and Node 20+, so no per-environment code path is
+// needed. This module's exports and algorithm are identical across all of them.
 
 'use strict';
 
