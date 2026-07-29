@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:identity": "node --test src/identity.test.js src/identity.esm.test.mjs"
   },
   "keywords": [],
   "author": "",
