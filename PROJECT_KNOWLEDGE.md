@@ -29,12 +29,18 @@ notes for the next session:
 - v63.1 (Featured Updates: a deterministic "New from Mark" section in the Welcome Back
  dialog) is MERGED and LIVE in production as of July 27, 2026 (merge commit
  `40f34e46edac19e8f0bacc269a0eb52200b3f753`). See the v63.1 section below for full detail.
+- **`PLATFORM_BLUEPRINT.md` is now present in the repository root and is the HIGHEST
+ authority document** for the Collier Platform (above this file). Consult it first for any
+ significant product/engineering decision.
 - **Verified Identity Foundation — Phase 0 (cookie architecture proof): COMPLETE, 2026-07-29.**
  A feasibility spike only; it changed NO production authentication. It proved the Cloudflare
  Pages + same-site auth-subdomain cookie design and passed the full browser matrix. The
  temporary test page was removed after testing. The full Verified Identity Foundation
  implementation is the NEXT release (not started). Profile Photos has NOT begun. See the
  "Phase 0" section below for full detail.
+- **Verified Identity Foundation — Phase 1 (identity specification): identity spec + golden
+ tests added, 2026-07-29.** Canonical `src/identity.js` + `src/identityVectors.js` + tests;
+ NO production runtime change. See the "Phase 1" section below.
 - **READ BEFORE ANY QA:** on 2026-07-22 a QA mistake truncated two REAL production channels
  (`cats-mod-01`, `cats-mod-03`). Impact was accepted by the product owner, recovery is not
  expected. Destructive operations against production channels are now PROHIBITED, `truncate()`
@@ -874,6 +880,55 @@ stayed byte-identical to v63.1 throughout.
 
 **Next.** The full Verified Identity Foundation implementation is the next release and has
 **not** been started. **Profile Photos has not begun.**
+
+## Verified Identity Foundation — Phase 1 (deterministic identity specification)
+
+**Status:** identity specification + golden-vector tests added (2026-07-29, branch
+`vif-phase1-identity-spec`). **No production runtime change**, no auth infrastructure, no
+Worker change, no deploy. This phase only establishes ONE canonical, tested definition of how
+an email becomes a Stream user ID, so the future authentication service can derive identity
+server-side identically. Later VIF phases (auth routes, Durable Objects, session, cutover) are
+**not** implemented and must not be treated as done.
+
+**Highest authority.** `PLATFORM_BLUEPRINT.md` is now in the repo root and is the highest
+authority document (above this file).
+
+**Canonical files:** `src/identity.js` (exports `normalizeEmail`, `emailToUserId`),
+`src/identityVectors.js` (golden fixture), `src/identity.test.js` (Node `node:test`). Run:
+`npm run test:identity` (no network / Stream / Cloudflare / email / secrets; exits nonzero on
+failure; CI-suitable). These live alongside the app source but are **not imported by
+`src/index.jsx`**, so the bundle is unaffected; the app keeps its existing inline copies at
+`src/index.jsx:119` (`normalizeEmail`) and `:129` (`emailToUserId`) — the same algorithm.
+
+**Exact algorithm (must never change):**
+1. Coerce the submitted value to a string, or empty string (`email || ''`).
+2. Trim leading/trailing whitespace.
+3. Lowercase.
+4. UTF-8 encode.
+5. SHA-256.
+6. Lowercase hexadecimal.
+7. Take the first 24 hex characters.
+8. Prefix with `cats-`.
+Conceptually: `cats-` + `sha256(utf8(email.trim().toLowerCase())).hex.slice(0, 24)`.
+
+**Golden identity vectors are a RELEASE INVARIANT.** Case, whitespace, and mixed-case variants
+of one address MUST map to the same Stream ID; plus-addresses and subdomains MUST stay
+distinct; and Mark's documented live ID `cats-8114d68476d8e833db5ac08a` MUST remain unchanged.
+The vectors (with full SHA-256 digests) are locked in `src/identityVectors.js`.
+
+**Provider-specific email canonicalization is PROHIBITED.** No Gmail dot removal, no `+tag`
+stripping, no alias consolidation, no added Unicode normalization, no domain-specific behavior
+— any such change would remap existing users to new Stream identities and orphan their
+profiles/history.
+
+**Future server-side identity derivation must match this specification byte-for-byte** (the
+same normalization + SHA-256 + first-24-hex + `cats-` prefix). The shared golden fixture is the
+parity check.
+
+**Production authentication is unchanged.** The raw browser-supplied `user_id` token-minting
+path remains live, so the **impersonation vulnerability remains OPEN** and is only closed in a
+later VIF phase (new authenticated `/token` + retirement of raw `user_id` minting).
+**Profile Photos has not begun.**
 
 ## QA SAFETY GUARDRAILS (required for all QA work)
 
