@@ -41,6 +41,10 @@ notes for the next session:
 - **Verified Identity Foundation — Phase 1 (identity specification): identity spec + golden
  tests added, 2026-07-29.** Canonical `src/identity.js` + `src/identityVectors.js` + tests;
  NO production runtime change. See the "Phase 1" section below.
+- **Verified Identity Foundation — Phase 2 (verification-state Durable Object): infrastructure
+ added under `auth/`, 2026-07-29. NOT deployed, no routes, no production change.** Strongly
+ consistent verification-code state (`VerificationDO`) + Wrangler config + tests. See the
+ "Phase 2" section below. Phase 3 not started.
 - **READ BEFORE ANY QA:** on 2026-07-22 a QA mistake truncated two REAL production channels
  (`cats-mod-01`, `cats-mod-03`). Impact was accepted by the product owner, recovery is not
  expected. Destructive operations against production channels are now PROHIBITED, `truncate()`
@@ -946,6 +950,56 @@ parity check.
 path remains live, so the **impersonation vulnerability remains OPEN** and is only closed in a
 later VIF phase (new authenticated `/token` + retirement of raw `user_id` minting).
 **Profile Photos has not begun.**
+
+## Verified Identity Foundation — Phase 2 (verification-state Durable Object infrastructure)
+
+**Status:** version-controlled auth infrastructure added (branch
+`vif-phase2-auth-infrastructure`). **NOT deployed.** No public auth routes, no live
+application integration, no session/cookie, no Resend, no DNS/Stream/Worker change. Only the
+strongly-consistent verification-code **state** engine is built and tested. **Routes are not
+implemented.** Production authentication is unchanged; the raw `user_id` impersonation vector
+remains OPEN. Profile Photos has not begun. **Phase 3 is not started.**
+
+**Source-control boundary.** Auth infra lives IN this repo under `auth/` (a directory, not a
+separate repo), reviewed via the normal PR flow, but deployed via **Wrangler** — never via the
+chat app's GitHub Pages pipeline. The Phase 0 proof Pages project (`collier-auth-proof`, live
+at `auth.mentalhealthmadesimple.life`) is untouched; its source remains an un-versioned local
+folder to be reconciled into version control later. See `auth/README.md` for the full boundary.
+
+**Topology:** Browser → `auth.mentalhealthmadesimple.life` Pages Functions (Phase 3) →
+`VERIFICATION_DO` binding → the Durable Object (this phase). The DO Worker exists only to export
+the class and service the binding; it exposes **no public route** (default fetch 404).
+
+**`auth/verification-do/` (the Durable Object Worker):** `src/verificationLogic.js` (pure,
+tested rules), `src/verificationDO.js` (`VerificationDO` class), `src/index.js` (exports class +
+404), `wrangler.toml` (DO binding + SQLite migration, free-tier), tests, `package.json`
+(`npm test`, `npm run validate`). Wrangler `deploy --dry-run` validates the config and the
+`VERIFICATION_DO` Durable Object binding (no deploy).
+
+**Opaque object key:** `idFromName(HMAC-SHA256(normalizedEmail, IDENTITY_KEY_SECRET))`, computed
+by the Pages Function. The DO never receives the raw email.
+
+**Stored state (only):** `codeHmac`, `expiresAt`, `attemptsRemaining`, `sends[]`, `lastSendAt`,
+`consumed`. **Never stored:** plaintext code, raw email, session/Stream token, any secret,
+profile, roles/membership.
+
+**Behavior:** 10-min code lifetime; ≤5 attempts (5th locks); one active code; 60s resend
+cooldown; ≤3 sends/rolling hour; single-use consume; expired/reused rejected; lazy cleanup (no
+alarms). Concurrency safety relies on Durable Object per-instance serialization.
+
+**HMAC ownership (decision):** the **Pages Function** computes the code HMAC; the DO stores and
+compares HMACs only. This keeps the plaintext code out of the DO entirely, puts
+`CODE_HMAC_SECRET` in one place (the Pages Function), and leaves the DO needing no secret.
+
+**Rate limiting (decision):** prefer the Cloudflare **Workers Rate Limiting binding** (IP-keyed)
+on the Pages Functions — validated in Wrangler config but currently under experimental
+`[[unsafe.bindings]]`; account entitlement to be confirmed at an approved deploy. Fallback:
+a separate IP-keyed Durable Object (defined, not implemented). **Not used:** KV (eventually
+consistent) or zone WAF rules (domain is not a Cloudflare DNS zone).
+
+**Tests:** `cd auth/verification-do && npm test` → 15/15 (issuance, expiry, attempts, success/
+single-use, cooldown, rolling-hour, concurrency, security invariants). No network/Stream/
+Cloudflare/email/real secrets. Identity + Featured Updates suites remain green.
 
 ## QA SAFETY GUARDRAILS (required for all QA work)
 
