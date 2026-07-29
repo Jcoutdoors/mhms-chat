@@ -29,6 +29,12 @@ notes for the next session:
 - v63.1 (Featured Updates: a deterministic "New from Mark" section in the Welcome Back
  dialog) is MERGED and LIVE in production as of July 27, 2026 (merge commit
  `40f34e46edac19e8f0bacc269a0eb52200b3f753`). See the v63.1 section below for full detail.
+- **Verified Identity Foundation — Phase 0 (cookie architecture proof): COMPLETE, 2026-07-29.**
+ A feasibility spike only; it changed NO production authentication. It proved the Cloudflare
+ Pages + same-site auth-subdomain cookie design and passed the full browser matrix. The
+ temporary test page was removed after testing. The full Verified Identity Foundation
+ implementation is the NEXT release (not started). Profile Photos has NOT begun. See the
+ "Phase 0" section below for full detail.
 - **READ BEFORE ANY QA:** on 2026-07-22 a QA mistake truncated two REAL production channels
  (`cats-mod-01`, `cats-mod-03`). Impact was accepted by the product owner, recovery is not
  expected. Destructive operations against production channels are now PROHIBITED, `truncate()`
@@ -52,7 +58,8 @@ It is LIVE with real students. Treat every change as a production change.
 
 **Chat bundle (the app itself)**
 - React app built with webpack into a single self-contained bundle plus a few lazy chunks.
-- Hosted on GitHub Pages (repo `mhms-chat`, personal GitHub account `jcoutdoors`), served via the custom domain `https://chat.mentalhealthmadesimple.life` (GitHub Pages custom domain; DNS is a CNAME at GoDaddy: name `chat` -> `jcoutdoors.github.io`). The old `https://jcoutdoors.github.io/mhms-chat/` address now redirects to the custom domain.
+- Hosted on GitHub Pages (repo `mhms-chat`, personal GitHub account `jcoutdoors`), served via the custom domain `https://chat.mentalhealthmadesimple.life` (GitHub Pages custom domain; DNS is a CNAME `chat` -> `jcoutdoors.github.io`). The old `https://jcoutdoors.github.io/mhms-chat/` address now redirects to the custom domain.
+- **DNS authority (corrected 2026-07-29, verified via `dig`):** authoritative DNS for `mentalhealthmadesimple.life` is managed through **NS1/Squarespace**, NOT GoDaddy. Authoritative nameservers are `dns1-4.p08.nsone.net`. (Earlier docs, including the v44 note below, said "GoDaddy CNAME"; that was inaccurate.) `www`/root point to Squarespace; `chat` is a CNAME to `jcoutdoors.github.io` (GitHub Pages); `auth.mentalhealthmadesimple.life` is connected through a Squarespace-managed CNAME to the Cloudflare Pages project (see the Phase 0 section below).
 - The iframe embed in Squarespace points at `https://chat.mentalhealthmadesimple.life`.
 - Why bundled this way: Squarespace blocks external CDN scripts and ES modules, so React, stream-chat, and stream-chat-react are all pre-bundled into one file and loaded from GitHub Pages inside an iframe.
 
@@ -303,7 +310,7 @@ If reactions, uploads, or user search ever break, re-check these.
 - **v41** - fix: the hover toolbar and reaction picker were anchored to the far edge of the message row, which floated them far from the bubble on a full-width (non-embed) screen. Now anchored next to the bubble (56px in on the content side) for both own and others' messages.
 - **v42** - restored a visible send button. Stream's native send button (`.str-chat__send-button`) was not showing in our custom composer layout (v2 theme positions it inside its own wrapper, which our restyle hid). Added our own gradient airplane button to the composer; it dispatches an Enter keydown on the textarea (the same path Enter-to-send already uses, the reliable trigger) and only fires on non-empty text. Native button hidden via CSS.
 - **v43** - fixed mobile sidebar scrolling. The sidebar had a nested scroll region (the members list was `flex:1` + `overflowY:auto` inside the already-scrollable sidebar), so on mobile the inner list captured the gesture and the channel list above could not be reached. Made the whole sidebar one scroll container: members list and profile footer now flow normally (no competing scroll, no `marginTop:auto` pin), with `WebkitOverflowScrolling:touch` for momentum.
-- **v44** - custom domain migration. Chat now served from `https://chat.mentalhealthmadesimple.life` (GoDaddy CNAME -> jcoutdoors.github.io, GitHub Pages custom domain, Enforce HTTPS on). Updated the notification icon URL off the old address. IMPORTANT LESSONS from the migration: (1) the app's `emailToUserId` uses `crypto.subtle`, which only exists in a secure (HTTPS) context, so the new domain could not log anyone in until Enforce HTTPS was on. (2) The token worker had a single hardcoded `Access-Control-Allow-Origin`; it now keeps an allow-list (subdomain, github.io, both squarespace hosts) and echoes the matching origin. (3) Setting a GitHub Pages custom domain immediately redirects the old address to the new one, so it must only be set AFTER DNS is verified and HTTPS is ready, or the live embed breaks. The notification worker did NOT need a CORS change (it receives Stream webhooks, not browser calls).
+- **v44** - custom domain migration. Chat now served from `https://chat.mentalhealthmadesimple.life` (CNAME `chat` -> jcoutdoors.github.io, GitHub Pages custom domain, Enforce HTTPS on; authoritative DNS is NS1/Squarespace, not GoDaddy — see the DNS authority note in Architecture). Updated the notification icon URL off the old address. IMPORTANT LESSONS from the migration: (1) the app's `emailToUserId` uses `crypto.subtle`, which only exists in a secure (HTTPS) context, so the new domain could not log anyone in until Enforce HTTPS was on. (2) The token worker had a single hardcoded `Access-Control-Allow-Origin`; it now keeps an allow-list (subdomain, github.io, both squarespace hosts) and echoes the matching origin. (3) Setting a GitHub Pages custom domain immediately redirects the old address to the new one, so it must only be set AFTER DNS is verified and HTTPS is ready, or the live embed breaks. The notification worker did NOT need a CORS change (it receives Stream webhooks, not browser calls).
 - **v45/v46** - persistent unread + mention badges (the real fix). v45 first made the client watch ALL channels on login (so live `message.new` fires everywhere, not just opened channels). v46 then switched from in-memory counting to Stream's server-side read state: on login, badges are seeded from `channel.countUnread()` and `channel.countUnreadMentions()`, so users see everything missed since their LAST session (and across devices), not just what arrives while connected. Opening a channel calls `channel.markRead()` so the cleared state persists server-side; a message arriving in the currently-viewed channel marks read instead of badging (uses an `activeIdRef` so the event handler sees the current channel). REQUIRES `read_events` enabled on the `messaging` channel type in the Stream dashboard, or counts return 0 and it silently falls back to live-only. Real-time browser popup/chime remain mention-only and live-only by nature (a closed browser can't be notified; that would need push infrastructure). Deployed as one build (v45 skipped as a standalone).
 - **v47** - search icon restyle. The channel search was a bare faint emoji stranded in the far-right corner of the header, hard to locate. Now a bordered boxed button (white background, 1px border, 38x38, radius 10, soft shadow, indigo hover) matching the send button, moved inward (right:24) and vertically centered (top:13) in the 64px header.
 - **v48** - copy update to match the notification worker's added `@dr. mark mayfield` route. Updated the Getting Started wiki "Reaching the instructor" section and the composer hint line under the message box to list `@dr. mark mayfield` alongside `@mark`. (Worker change is separate, deployed in Cloudflare; see notification-worker.js.)
@@ -819,6 +826,54 @@ localStorage works and degrades to page-session-only when it does not; no cross-
 (2) The 7-day horizon is fixed because there is no reliable last-visit timestamp. (3) A very
 recently published update will not reopen an already-open session's dialog; it appears on the
 next initialization. **This feature does NOT use AI-generated summaries.**
+
+## Verified Identity Foundation — Phase 0 cookie architecture proof (COMPLETE, feasibility only)
+
+**Status:** Phase 0 complete 2026-07-29. This was a **feasibility spike only** — it did not
+change production authentication, the token Worker, `connectChat`, `tokenUrl`, Stream, or
+Resend, and it issued no platform sessions and no Stream tokens.
+
+**Purpose.** The current token Worker mints a Stream token for any browser-supplied `user_id`
+with no proof of ownership; because Stream IDs are `emailToUserId` (SHA-256 of the email),
+that is an impersonation vector. The Verified Identity Foundation will close it with
+passwordless email verification and signed platform sessions. Before building that, Phase 0
+had to prove the domain/cookie/CORS design worked in the real production topology.
+
+**Approved architecture (proven).** A **Cloudflare Pages** project (`collier-auth-proof`)
+hosts the future auth service at `https://auth.mentalhealthmadesimple.life`, reached through a
+**Squarespace-managed CNAME** (`auth` -> `collier-auth-proof.pages.dev`) — no nameserver
+migration, no full/partial Cloudflare zone, no Enterprise delegation. TLS is auto-issued by
+Cloudflare (Google Trust Services). This works because `auth.*` and `chat.*` share the
+registrable domain `mentalhealthmadesimple.life`, making chat->auth requests **same-site**, so
+a host-only `SameSite=Lax` cookie is sent (including inside the Squarespace-embedded iframe).
+Pages Functions can later bind to a Durable Object hosted in a separate Worker (SQLite-backed
+DO is available on the Workers free plan).
+
+**Proof-cookie routes** (isolated Pages Functions; no Stream/Resend/JWT/identity/secrets):
+- `POST /proof/set` — sets the proof cookie; exact-Origin check.
+- `GET /proof/check` — reports only `cookiePresent` boolean; never the value.
+- `POST /proof/logout` — expires the cookie; idempotent.
+
+**Cookie attributes tested:** `__Host-collier_auth_proof=1; Secure; HttpOnly; SameSite=Lax;
+Path=/; Max-Age=600` (no `Domain`, value carries no identity). CORS: exact
+`Access-Control-Allow-Origin: https://chat.mentalhealthmadesimple.life`,
+`Access-Control-Allow-Credentials: true`, `Vary: Origin`, explicit methods/headers, explicit
+OPTIONS preflight; unapproved/missing Origin -> 403 with no ACAO and no `Set-Cookie`.
+
+**Browser matrix — all required environments PASSED** (Set / HttpOnly / Cookie returned /
+Logout / Final status): Chrome desktop normal, Chrome desktop incognito, Safari desktop
+normal, Safari desktop private, Safari iPhone, and the Squarespace-embedded iframe path.
+**Chrome Android was optional and not tested.** The required browser architecture proof is
+approved.
+
+**Test harness lifecycle.** A temporary visible test page `proof-cookie-test.html` was served
+at `https://chat.mentalhealthmadesimple.life/proof-cookie-test.html` (the approved origin;
+GitHub Pages is the only way to reach it) via PR #6 (merge `c018a171c8ab57c71156086a71a3eddf22fa696c`),
+then **removed** in the Phase 0 cleanup after the matrix passed. The production `chat.bundle.js`
+stayed byte-identical to v63.1 throughout.
+
+**Next.** The full Verified Identity Foundation implementation is the next release and has
+**not** been started. **Profile Photos has not begun.**
 
 ## QA SAFETY GUARDRAILS (required for all QA work)
 
