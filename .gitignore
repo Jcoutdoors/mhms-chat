@@ -6,3 +6,6 @@ dist-dev/
 *.local
 dist/
 package-lock.json
+.wrangler/
+.pages-build/
+.dryrun/

@@ -1,0 +1,25 @@
+# GitHub Pages (Jekyll) build configuration.
+#
+# Deployment hygiene: exclude repository SOURCE that is not part of the served
+# chat application, so it is not published under https://chat.mentalhealthmadesimple.life/.
+# These are build/source/docs/infra files only. The running app uses
+# index.html + chat.bundle.js + *.chunk.js + icons/images + CNAME — none of which
+# are excluded — so serving is unaffected. This is a reversible deployment-boundary
+# change; it adds nothing to the app bundle and does not alter application behavior.
+#
+# NOTE (no secrets): nothing excluded here contains secrets. This is clean
+# deployment hygiene, not security-by-obscurity.
+exclude:
+  - auth/
+  - src/
+  - qa-tools/
+  - cloudflare-workers/
+  - node_modules/
+  - PLATFORM_BLUEPRINT.md
+  - PROJECT_KNOWLEDGE.md
+  - REVIEW_HANDOFF.md
+  - SETUP.md
+  - TECHNICAL_DEBT.md
+  - README.md
+  - package.json
+  - webpack.config.js
