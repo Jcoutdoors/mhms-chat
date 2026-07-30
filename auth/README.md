@@ -24,7 +24,9 @@ app's GitHub Pages pipeline.
 - `public/` — placeholder static asset (Pages build output dir).
 - `functions/proof/{set,check,logout}.js` — the preserved Phase 0 proof routes.
 - `functions/__do-binding-check.js` — LOCAL-ONLY, env-gated (`LOCAL_DO_PROOF=1`)
-  proof of the Pages→Durable Object binding; returns 404 in production.
+  proof of the Pages→Durable Object binding; returns 404 whenever `LOCAL_DO_PROOF`
+  is not explicitly set (production never sets it). **Must be removed or excluded
+  before the first approved production deployment from `auth/pages/`.**
 - `wrangler.toml` — Pages config (`pages_build_output_dir`, compatibility date) +
   the external Durable Object binding (`VERIFICATION_DO` → class `VerificationDO`,
   `script_name = "collier-verification-do"`).
@@ -52,6 +54,18 @@ cd auth/pages && npx wrangler pages dev public --port 8788 \
 #   then drive the gated probe (state persists; concurrent ops serialize):
 curl "http://127.0.0.1:8788/__do-binding-check?id=x&op=requestCode&codeHmac=<hex>"
 ```
+
+### Deployment debt — GitHub Pages source exposure (NOT changed in Phase 2)
+The chat app's GitHub Pages root deployment already serves repository source
+publicly at `https://chat.mentalhealthmadesimple.life/` (`src/`, `qa-tools/`, docs
+all return 200), and after merge it may likewise serve `auth/`. **No secrets or
+production credentials are committed** in `auth/` (or elsewhere), and backend source
+visibility is **not** a security control. Phase 2 deliberately does **not** change
+the GitHub Pages publication model — that is a live hosting-boundary change that
+must be validated (full generated output vs current live output) and **reviewed
+separately**. Future deployment-hygiene work should publish only the intended static
+app output (`index.html`, `chat.bundle.js`, `*.chunk.js`, icons/images, `CNAME`) and
+exclude source/infra. Tracked as deployment debt.
 
 ### Future deployment (requires explicit approval; NOT done in Phase 2)
 ```

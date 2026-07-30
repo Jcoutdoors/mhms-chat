@@ -979,11 +979,17 @@ matches the business-logic assumptions. **Phase 0 proof behavior is preserved** 
 tests: set/check/logout, exact-origin credentialed CORS, `__Host-` cookie attributes, no
 `Domain`, no cookie-value disclosure).
 
-**GitHub Pages exposure:** all repo source is already publicly served under
-`https://chat.mentalhealthmadesimple.life/` (e.g. `src/`, `qa-tools/`, docs). A `_config.yml`
-`exclude` now removes `auth/` (and other non-app source/docs) from the published site — clean
-deployment hygiene, no secrets involved; app runtime assets (bundle, chunks, index, images,
-CNAME) are unaffected. Effect to be confirmed on the live Pages build post-merge (reversible).
+**GitHub Pages exposure (DEPLOYMENT DEBT — not changed in Phase 2):** the GitHub Pages root
+deployment already serves repository source directories publicly under
+`https://chat.mentalhealthmadesimple.life/` (e.g. `src/`, `qa-tools/`, docs — all HTTP 200),
+and after this PR merges it may likewise serve `auth/`. **No secrets or production credentials
+are committed in `auth/` (or elsewhere in the repo)**, and backend source visibility is **not**
+treated as a security control. Phase 2 **does not change the GitHub Pages publication model** —
+altering the Jekyll/Pages publishing boundary is a production hosting-behavior change that must
+be validated (complete generated output vs current live output) and **reviewed separately**. A
+future deployment-hygiene change should publish only the intended static application output
+(`index.html`, `chat.bundle.js`, `*.chunk.js`, icons/images, `CNAME`) and exclude source/infra;
+tracked as deployment debt.
 
 **Topology:** Browser → `auth.mentalhealthmadesimple.life` Pages Functions (Phase 3) →
 `VERIFICATION_DO` binding → the Durable Object (this phase). The DO Worker exists only to export
