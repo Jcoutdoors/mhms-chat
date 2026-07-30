@@ -15,7 +15,10 @@ export async function onRequestPost(context) {
   if (!isApprovedOrigin(request)) return rejectOrigin();
 
   const rl = await checkIpRateLimit(env, request);
-  if (!rl.allowed) return errorApproved('rate_limited', 429);
+  if (!rl.allowed) {
+    // Fail closed: 'unavailable' -> service_unavailable; over-limit -> rate_limited.
+    return rl.reason === 'unavailable' ? errorApproved('service_unavailable', 503) : errorApproved('rate_limited', 429);
+  }
 
   const body = await readJson(request);
   if (!body || typeof body.email !== 'string') return errorApproved('invalid_request', 400);
