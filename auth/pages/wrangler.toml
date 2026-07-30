@@ -1,0 +1,20 @@
+# Cloudflare Pages project — auth.mentalhealthmadesimple.life (VIF).
+# Version-controlled config for the existing collier-auth-proof Pages project.
+# NOT deployed by this phase. Deploy requires explicit approval (see auth/README.md).
+# No secret VALUES here — only binding names.
+
+name = "collier-auth-proof"
+compatibility_date = "2026-07-29"
+pages_build_output_dir = "public"
+# Pages Functions are auto-discovered from ./functions
+
+# External Durable Object binding: the VerificationDO class is exported by the
+# separate Worker deployed from auth/verification-do/ (script name below).
+[[durable_objects.bindings]]
+name = "VERIFICATION_DO"
+class_name = "VerificationDO"
+script_name = "collier-verification-do"
+
+# Phase 3 will add these as Cloudflare secrets (names only; never committed):
+#   IDENTITY_KEY_SECRET, CODE_HMAC_SECRET, SESSION_SIGNING_SECRET,
+#   STREAM_SECRET, RESEND_API_KEY
