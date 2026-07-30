@@ -43,11 +43,11 @@ notes for the next session:
  NO production runtime change. See the "Phase 1" section below.
 - **Verified Identity Foundation — Phase 2 (verification-state Durable Object): infrastructure
  added under `auth/`, 2026-07-29 — implemented but not deployed during Phase 2 itself, with no
- chat integration in that phase. The Durable Object Worker was **subsequently deployed during the
- Phase 3 production rollout** (now live).** Strongly consistent verification-code state
+ chat integration in that phase. The Durable Object Worker was subsequently deployed during the
+ Phase 3 production rollout (now live).** Strongly consistent verification-code state
  (`VerificationDO`) + Wrangler config + tests. See the "Phase 2" section below.
 - **Verified Identity Foundation — Phase 3 (server-side auth routes): implemented in `auth/pages/`
- and **deployed independently to production**, 2026-07-30; **NO chat cutover.**** Full flow —
+ and deployed independently to production, 2026-07-30; NO chat cutover.** Full flow —
  `/verify/request`, `/verify/submit`, `/token`, `/logout` — signed 30-day `__Host-` session,
  server-side Stream-ID derivation, branded Resend email on the **verified, live** sending domain
  `send.mentalhealthmadesimple.life`, IP + per-identity rate limiting. Deployed at
