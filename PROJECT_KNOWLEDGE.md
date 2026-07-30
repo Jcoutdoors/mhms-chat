@@ -42,15 +42,19 @@ notes for the next session:
  tests added, 2026-07-29.** Canonical `src/identity.js` + `src/identityVectors.js` + tests;
  NO production runtime change. See the "Phase 1" section below.
 - **Verified Identity Foundation — Phase 2 (verification-state Durable Object): infrastructure
- added under `auth/`, 2026-07-29. NOT deployed, no routes, no production change.** Strongly
- consistent verification-code state (`VerificationDO`) + Wrangler config + tests. See the
- "Phase 2" section below.
-- **Verified Identity Foundation — Phase 3 (server-side auth routes): implemented in
- `auth/pages/`, 2026-07-30. NOT deployed; NO chat cutover.** Full flow — `/verify/request`,
- `/verify/submit`, `/token`, `/logout` — signed 30-day `__Host-` session, server-side Stream-ID
- derivation, branded Resend email (domain not yet verified → deploy blocker), IP + per-identity
- rate limiting. The old token Worker is UNCHANGED and the raw `user_id` impersonation path
- remains OPEN until Phase 4/5. See the "Phase 3" section below. Profile Photos not begun.
+ added under `auth/`, 2026-07-29 — implemented but not deployed during Phase 2 itself, with no
+ chat integration in that phase. The Durable Object Worker was subsequently deployed during the
+ Phase 3 production rollout (now live).** Strongly consistent verification-code state
+ (`VerificationDO`) + Wrangler config + tests. See the "Phase 2" section below.
+- **Verified Identity Foundation — Phase 3 (server-side auth routes): implemented in `auth/pages/`
+ and deployed independently to production, 2026-07-30; NO chat cutover.** Full flow —
+ `/verify/request`, `/verify/submit`, `/token`, `/logout` — signed 30-day `__Host-` session,
+ server-side Stream-ID derivation, branded Resend email on the **verified, live** sending domain
+ `send.mentalhealthmadesimple.life`, IP + per-identity rate limiting. Deployed at
+ `auth.mentalhealthmadesimple.life`; verification email delivery operational; API validation and
+ the production browser matrix are complete. The old token Worker is UNCHANGED and the raw
+ `user_id` impersonation path remains OPEN until Phase 4/5. See the "Phase 3" section below.
+ Profile Photos not begun.
 - **READ BEFORE ANY QA:** on 2026-07-22 a QA mistake truncated two REAL production channels
  (`cats-mod-01`, `cats-mod-03`). Impact was accepted by the product owner, recovery is not
  expected. Destructive operations against production channels are now PROHIBITED, `truncate()`
@@ -107,19 +111,17 @@ It is LIVE with real students. Treat every change as a production change.
 - URL: `https://cats-notifications.jonathan-5ad.workers.dev`
 - Receives Stream `message.new` webhook events, sends email via Resend.
 - Env var: `RESEND_API_KEY` (Secret).
-- From address (`FROM_ADDRESS` constant): migrating to `notifications@send.mentalhealthmadesimple.life`.
-  The repo/main code now carries the new sender; the **currently-deployed** Worker still sends from
-  the legacy `no-reply@notifications.nexgenrva.com` until the new domain is verified in Resend and the
-  Worker is redeployed (see the notification-domain migration below). Do NOT treat the new domain as
-  verified until Resend confirms it.
-- **Notification-domain migration (prepared, NOT deployed):** the free Resend plan allows only **one**
-  domain, so a single verified domain — `send.mentalhealthmadesimple.life` — will serve **both** the
+- From address (`FROM_ADDRESS` constant): `notifications@send.mentalhealthmadesimple.life` — **live
+  in production.** The deployed Worker now sends from the verified sending domain; the legacy
+  `no-reply@notifications.nexgenrva.com` sender is retired.
+- **Notification-domain migration (COMPLETE, deployed):** PR #13 merged (merge `d057f16`) and the
+  notification Worker was redeployed (version `1b474bab`) on the **verified, live** sending domain
+  `send.mentalhealthmadesimple.life`; live delivery of `@mark`/`@support` was validated. The free
+  Resend plan allows only **one** domain, so this single verified domain serves **both** the
   notification sender (`notifications@send.mentalhealthmadesimple.life`) and the auth verification
-  sender (`verification@send.mentalhealthmadesimple.life`). Removing the old domain and verifying the
-  new one causes a **controlled notification-email outage** during cutover (see the cutover runbook in
-  the migration PR). API key: the existing `cats-notifications` key is scoped "All domains / Full
-  access", so it is expected to keep working after the domain swap; provision a replacement only if it
-  does not.
+  sender (`verification@send.mentalhealthmadesimple.life`). The `cats-notifications` key (scoped
+  "All domains / Full access") continued to work across the swap; no key change was needed. (Detail:
+  `REVIEW_HANDOFF.md`.)
 - Routing: `@mark` / `@dr. mayfield` / `@dr. mark mayfield` → emails `dr.mark.mayfield@gmail.com`; `@support` / `@help` → emails `jonathan@nexgenrva.com`. (The `@dr. mark mayfield` variant was added in v48.) As of v61, mention patterns have a negative-lookbehind guard so email addresses in message text (like `jon@support.org` or Mark's own Gmail address) do NOT false-trigger, and a trailing word boundary so `@marketing` does not partially match `@mark`.
 - The email template includes a `CHANNEL_NAMES` friendly-name map (keep in sync with
  `APP_CONFIG.channelGroups` in the app) and a "Respond in the Chat" button linking to
@@ -971,12 +973,19 @@ later VIF phase (new authenticated `/token` + retirement of raw `user_id` mintin
 
 ## Verified Identity Foundation — Phase 2 (verification-state Durable Object infrastructure)
 
-**Status:** version-controlled auth infrastructure added (branch
-`vif-phase2-auth-infrastructure`). **NOT deployed.** No public auth routes, no live
-application integration, no session/cookie, no Resend, no DNS/Stream/Worker change. Only the
-strongly-consistent verification-code **state** engine is built and tested. **Routes are not
-implemented.** Production authentication is unchanged; the raw `user_id` impersonation vector
-remains OPEN. Profile Photos has not begun. **Phase 3 is not started.**
+**Status (historical — Phase 2 as completed):** version-controlled auth infrastructure added
+(branch `vif-phase2-auth-infrastructure`). **At Phase 2 completion this layer was implemented but
+not yet deployed** — no public auth routes, no live application integration, no session/cookie, no
+Resend, no DNS/Stream/Worker change; only the strongly-consistent verification-code **state**
+engine was built and tested, and the public routes did not yet exist (they were added in Phase 3).
+
+**Current status (updated after Phase 3 rollout):** the Durable Object layer (`VerificationDO`,
+later joined by `IpRateLimitDO`) was **subsequently deployed during the approved Phase 3 production
+rollout** and is now live in the `collier-verification-do` Worker. **Phase 3 is now complete as an
+independent auth deployment** (see the Phase 3 section below). **Phase 4 has not started:** the chat
+app has not cut over, the legacy raw-`user_id` token Worker remains live and unchanged, and the
+impersonation vector remains OPEN until Phase 4 (cutover) and Phase 5 (retire the old Worker).
+Profile Photos has not begun.
 
 **Source-control boundary.** Auth infra lives IN this repo under `auth/` (a directory, not a
 separate repo), reviewed via the normal PR flow, but deployed via **Wrangler** — never via the
@@ -1053,11 +1062,12 @@ Cloudflare/email/real secrets. Identity + Featured Updates suites remain green.
 
 ## Verified Identity Foundation — Phase 3 (server-side authentication routes)
 
-**Status:** implemented in `auth/pages/` (branch `vif-phase3-auth-routes`). **NOT deployed; NO
-chat cutover.** The live chat app still uses the old raw-`user_id` token Worker, which is
-**unchanged**; the **impersonation vulnerability remains OPEN** and is closed only in Phase 4
-(app cutover to authenticated `/token`) and Phase 5 (retire the old Worker). No Stream data
-accessed/modified. Profile Photos not begun.
+**Status:** implemented in `auth/pages/` and **deployed independently to production** (on `main`;
+see the "independent production deployment + browser matrix" subsection below). **NO chat
+cutover:** the live chat app still uses the old raw-`user_id` token Worker, which is **unchanged**;
+the **impersonation vulnerability remains OPEN** and is closed only in Phase 4 (app cutover to
+authenticated `/token`) and Phase 5 (retire the old Worker). No Stream data accessed/modified.
+Profile Photos not begun.
 
 **Routes (all `POST`; exact-origin credentialed CORS; `Cache-Control: no-store`; generic error
 shape `{ok:false,error}`):** `/verify/request`, `/verify/submit`, `/token`, `/logout`. Meaning
@@ -1097,9 +1107,11 @@ abandoned pendings lazily expire (~2 min). The legacy single-shot `requestCode` 
 DO stores only opaque HMAC + timestamps/counters + a pending `{issuanceId,codeHmac,reservedAt}` —
 no raw email, no plaintext code, no secret.
 
-**Email:** branded MHMS sender `verification@send.mentalhealthmadesimple.life` — **domain not yet
-verified in Resend (DEPLOY BLOCKER)**; tested with a mock transport + local capture; no real
-email sent.
+**Email:** branded MHMS sender `verification@send.mentalhealthmadesimple.life` — the sending
+domain `send.mentalhealthmadesimple.life` is **verified in Resend and live in production** (the
+single free-plan domain shared with the notification Worker; auth uses the dedicated
+`cats-auth-verification` key). Real verification emails were confirmed delivered during production
+validation (see the deployment subsection below).
 
 **Rate limiting:** dedicated **trailing rolling-window** `IpRateLimitDO` (Pages binding
 `IP_RATE_LIMIT_DO`), trusted `CF-Connecting-IP`, opaque HMAC key from the **dedicated**
@@ -1112,7 +1124,53 @@ per-identity DO cooldown/hourly limits remain the tighter control. (Implemented 
 integration via the real Phase 2 logic, email adapter, rate-limit adapter) + full **workerd**
 local integration (request→DO→capture→submit→cookie→`/token`→logout→401, origin rejection).
 `auth/verification-do` 15/15, identity 9/9, Featured Updates 41/41. Pages Functions build compiles;
-DO dry-run valid. The Phase 2 `__do-binding-check.js` proof route was removed.
+DO dry-run valid. The Phase 2 `__do-binding-check.js` proof route was removed. (Current suite
+counts after the Phase 3 IP-rate-limit and notification-migration work: `auth/pages` 44/44,
+`auth/verification-do` 37/37, identity 9/9, Featured 41/41, notifications 12/12.)
+
+### Phase 3 — independent production deployment + browser matrix (COMPLETE; NO chat cutover)
+
+The auth service is **deployed to production and validated independently of the chat app.** The
+live chat remains on the legacy token Worker; **this is not a Phase 4 cutover** and the
+impersonation vulnerability stays open until Phase 4/5.
+
+**Deployed:** Durable Object Worker `collier-verification-do` (exports `VerificationDO` +
+`IpRateLimitDO`; migrations v1+v2; default public fetch is inert `404`; **no secrets**) and the
+Pages project `collier-auth-proof` at custom domain `auth.mentalhealthmadesimple.life`. Six
+secrets are provisioned to the Pages project only (`IDENTITY_KEY_SECRET`, `CODE_HMAC_SECRET`,
+`SESSION_SIGNING_SECRET`, `STREAM_SECRET`, `RESEND_API_KEY`, `IP_RATE_LIMIT_KEY_SECRET`);
+`STREAM_SECRET` reuses the existing Stream app secret (not rotated); `RESEND_API_KEY` is the
+dedicated `cats-auth-verification` key.
+
+**Production topology (schemefully same-site under `mentalhealthmadesimple.life`):**
+- top-level: `https://www.mentalhealthmadesimple.life` (Squarespace; CATS at `/catscourse#community`)
+- iframe: `chat.mentalhealthmadesimple.life` (GitHub Pages)
+- auth: `auth.mentalhealthmadesimple.life` (Cloudflare Pages)
+
+All three are subdomains of the registrable domain `mentalhealthmadesimple.life` (`.life` is a
+public suffix), so the relationship is **same-site** — proven, not assumed.
+
+**Browser matrix (all PASS)** — Chrome desktop normal · Chrome desktop incognito · Safari desktop
+normal · Safari desktop private · Safari on iPhone · **real Squarespace iframe**. Conducted via a
+temporary, unlinked, self-contained harness on the chat origin (only approved origin for the
+credentialed CORS), then removed (PRs #14/#15 add+rename, #16 remove; harness URL now `404`; no
+runtime/bundle/Worker files changed).
+
+**Proven behavior (production):**
+- verification request succeeds within rate limits; code submission succeeds (`HTTP 200`)
+- `__Host-collier_session` is set with `Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000`, no `Domain`
+- the session cookie is **not** visible to JavaScript (`document.cookie` never exposes it)
+- `/token` succeeds with the authenticated session and returns the **deterministic** Stream
+  `user_id` (matches the canonical Phase 1 algorithm; token value never displayed/logged)
+- logout clears the browser cookie; post-logout `/token` returns `401 session_required`
+- **`SameSite=Lax` works in the real Squarespace iframe**; Safari ITP (desktop, private, iPhone)
+  did **not** break the same-site session flow
+- IP rate limiting returns `429` + `Retry-After` (trailing rolling window); per-identity
+  cooldown/hourly limits are independent per email identity (each identity hitting its own limit
+  returned `429` while alternate identities remained usable — not a browser/iframe/cookie failure)
+
+**Cookie/session prerequisite for Phase 4: satisfied.** See `TECHNICAL_DEBT.md` for the one known
+design characteristic (stateless sessions are not server-side revocable on logout).
 
 ## QA SAFETY GUARDRAILS (required for all QA work)
 

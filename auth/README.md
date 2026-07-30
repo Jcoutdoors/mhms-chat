@@ -1,13 +1,17 @@
 # Collier auth infrastructure (Verified Identity Foundation)
 
 Version-controlled Cloudflare authentication infrastructure. **Phase 3 status:
-full server-side auth flow implemented in `auth/pages/` (verify/request, verify/
-submit, token, logout) + session/cookie/email/rate-limit modules. NOT deployed.
-The live chat still uses the old token Worker; that Worker is unchanged and the
-raw `user_id` impersonation path remains OPEN until Phase 4/5 (app cutover + old
-Worker retirement). No Stream data changed. Profile Photos has not begun.**
+full server-side auth flow (`auth/pages/`: verify/request, verify/submit, token,
+logout + session/cookie/email/rate-limit modules) is DEPLOYED to production and
+validated independently** — production routes live at `auth.mentalhealthmadesimple.life`,
+Pages → Durable Object binding active, verified Resend sending domain operational,
+API validation + production browser matrix complete, and the temporary test harness
+removed. **The chat has NOT cut over:** the live chat still uses the legacy token
+Worker; that Worker is unchanged and the raw `user_id` impersonation path remains
+OPEN until Phase 4/5 (app cutover + old Worker retirement). Phase 4 has not started.
+No Stream data changed. Profile Photos has not begun.
 
-## Phase 3 — production auth routes (implemented, not deployed)
+## Phase 3 — production auth routes (deployed; no chat cutover)
 
 Routes (all `POST`, exact-origin credentialed CORS, `Cache-Control: no-store`):
 - `POST /verify/request` (`functions/verify/request.js`) — validate+normalize email,
@@ -90,22 +94,21 @@ identity routing, active verification codes, or sessions. `auth/verification-do/
 production secret (it stores/compares opaque values only). Values are never committed; tests use
 deterministic test-only values.
 
-### Email (branded) — DEPLOY BLOCKER until verified
-Preferred sender `verification@send.mentalhealthmadesimple.life`. As of implementation the
-domain `send.mentalhealthmadesimple.life` is **NOT verified in Resend** (no DNS records).
-Before deploy, Jonathan must: (1) add `send.mentalhealthmadesimple.life` as a domain in the
-**auth Resend account**, (2) add the Resend-provided DNS records at Squarespace/NS1 (SPF TXT
-on `send`, DKIM `resend._domainkey`, MX `feedback-smtp…amazonses.com`, optional DMARC),
-(3) create an **auth-specific** `RESEND_API_KEY`. Do NOT silently fall back to
-`notifications.nexgenrva.com`. Email is tested here only with a mock transport / local capture.
+### Email (branded) — VERIFIED, LIVE
+Sender `verification@send.mentalhealthmadesimple.life`. The domain
+`send.mentalhealthmadesimple.life` is **verified in Resend and live in production**; the DNS
+records at Squarespace/NS1 (SPF TXT on `send`, DKIM `resend._domainkey`, MX
+`feedback-smtp…amazonses.com`, optional DMARC) are in place. The auth service uses a **dedicated**
+`cats-auth-verification` Resend key (it does **not** fall back to `notifications.nexgenrva.com`).
+Real verification email delivery was confirmed during production validation. (Unit tests still use a
+mock transport / local capture.)
 
 **Shared single domain (free-plan constraint):** the free Resend plan allows only one domain, so the
-same verified `send.mentalhealthmadesimple.life` serves **both** auth verification
-(`verification@…`) and the notification Worker (`notifications@…`). The notification Worker's sender
-migration to this domain is prepared separately (see the notification-domain migration PR and
-`cloudflare-workers/notification-worker.js`). Removing the old `notifications.nexgenrva.com` domain to
-free the slot causes a **controlled notification outage** during cutover. The domain is **not
-verified** until Resend confirms it.
+same verified `send.mentalhealthmadesimple.life` serves **both** auth verification (`verification@…`)
+and the notification Worker (`notifications@…`). The notification Worker's sender migration to this
+domain is **complete and deployed** (see `REVIEW_HANDOFF.md` and
+`cloudflare-workers/notification-worker.js`); the old `notifications.nexgenrva.com` domain was
+removed to free the single slot.
 
 ### IP rate limiting (dedicated Durable Object, TRUE ROLLING WINDOWS, FAIL CLOSED)
 Both `/verify/request` and `/verify/submit` call `checkIpRateLimit` first. It uses a dedicated
@@ -141,8 +144,12 @@ independent (no KV; no public endpoint).
 `wrangler dev` (DO Worker) + `wrangler pages dev` with `--do` and test-only `--binding` values
 incl. `LOCAL_EMAIL_CAPTURE=1` (the email adapter returns the code locally instead of sending).
 `harness/browser-auth-harness.html` is a **test-only** browser harness kept OUTSIDE `public/`
-(not deployed) and NOT added to the chat app; serve it from the chat origin for a future
-approved browser matrix.
+(not deployed) and NOT added to the chat app — for local full-flow checks only. The **production
+browser matrix is complete**: it was run via a **separate temporary harness served from the chat
+origin** (the only approved credentialed-CORS origin), which was **removed immediately after
+testing** — both temporary harness URLs now return `404` and **no permanent public harness
+exists**. (The exact temporary filename and the add/rename/remove PRs are recorded in
+`REVIEW_HANDOFF.md`.)
 
 ## Source-control boundary
 This lives inside the `mhms-chat` repository under `auth/` (a directory, not a
@@ -266,8 +273,9 @@ HMACs only.** Rationale:
 - The DO compares opaque hex strings (constant-time), which is simple and fully
   testable with deterministic, test-only secrets.
 
-## Pages → Durable Object binding (design; applied in Phase 3, not deployed now)
-On the auth Pages project (`collier-auth-proof`), bind the DO Worker:
+## Pages → Durable Object binding (active in production)
+On the auth Pages project (`collier-auth-proof`), the DO Worker is bound and the binding resolves
+in production against the deployed `collier-verification-do` script:
 ```toml
 # (Pages project wrangler config — Phase 3)
 [[durable_objects.bindings]]

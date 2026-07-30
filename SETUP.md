@@ -289,32 +289,48 @@ and do NOT weaken `retainConfiguredChannels()`, the QA guard, or QA fixture memb
 
 ---
 
-## Verified Identity Foundation — auth deploy prerequisites (Phase 3; NOT yet deployed)
+## Verified Identity Foundation — auth service (Phase 3; DEPLOYED — no chat cutover)
 
-The auth service (`auth/pages/` + `auth/verification-do/`) is implemented but **not deployed**,
-and the live chat still uses the old token Worker. Before any approved deploy:
+The auth service (`auth/pages/` + `auth/verification-do/`) is **deployed to production and validated
+independently**. The live chat has **not** cut over and still uses the legacy token Worker.
 
-1. **Resend branded domain (BLOCKER):** verify `send.mentalhealthmadesimple.life` in Resend and add
-   the Resend-provided DNS records at Squarespace/NS1 (SPF TXT on `send`, DKIM `resend._domainkey`,
-   MX → `feedback-smtp.us-east-1.amazonses.com`, optional DMARC). The free Resend plan allows only
-   **one** domain, so this single verified domain serves **both** senders:
+**Current production state (live):**
+- Durable Object Worker `collier-verification-do` deployed (`VerificationDO` + `IpRateLimitDO`;
+  migrations v1/v2; inert `404` default fetch; **no secret**).
+- Auth Pages project `collier-auth-proof` deployed; custom domain `auth.mentalhealthmadesimple.life`
+  live (`POST /verify/request`, `/verify/submit`, `/token`, `/logout`).
+- All six `auth/pages` secrets provisioned (names in step 2; values never shown).
+- Verified Resend sending domain `send.mentalhealthmadesimple.life` live; **verification email
+  delivery operational** (confirmed during production validation).
+
+**Current integration state (pending):**
+- The chat application has **not** cut over; the legacy raw-`user_id` token Worker remains live and
+  unchanged.
+- Phase 4 (chat cutover to authenticated `/token`) and Phase 5 (retire the old Worker) remain
+  pending; the raw-`user_id` impersonation vulnerability remains **open** until then.
+
+**How the service is configured (operation / reproduction reference):**
+
+1. **Resend branded domain (verified, live):** `send.mentalhealthmadesimple.life` is verified in
+   Resend with the Resend-provided DNS records at Squarespace/NS1 (SPF TXT on `send`, DKIM
+   `resend._domainkey`, MX → `feedback-smtp.us-east-1.amazonses.com`, optional DMARC). The free
+   Resend plan allows only **one** domain, so this single verified domain serves **both** senders:
    `notifications@send.mentalhealthmadesimple.life` (notification Worker) and
-   `verification@send.mentalhealthmadesimple.life` (auth). Because the current
-   `notifications.nexgenrva.com` domain must be removed first, cutover incurs a **controlled
-   notification-email outage** (see the notification-domain migration PR/runbook). Create an
-   **auth-specific** `RESEND_API_KEY` for the auth service; the notification Worker keeps its own
-   `cats-notifications` key (scoped "All domains", expected to remain valid after the swap).
+   `verification@send.mentalhealthmadesimple.life` (auth). The auth service uses a **dedicated**
+   `cats-auth-verification` Resend key; the notification Worker keeps its own `cats-notifications`
+   key (scoped "All domains").
 2. **Secrets** (`auth/pages/` only; never committed) via `wrangler pages secret put <NAME>`:
    `IDENTITY_KEY_SECRET`, `CODE_HMAC_SECRET`, `SESSION_SIGNING_SECRET`, `STREAM_SECRET`,
    `RESEND_API_KEY`, and **`IP_RATE_LIMIT_KEY_SECRET`** (dedicated key for the opaque IP-rate-limit
-   DO name; `openssl rand -hex 32`). The Durable Object Worker needs **no** secret.
+   DO name; `openssl rand -hex 32`). All six are provisioned; `STREAM_SECRET` reuses the existing
+   (un-rotated) Stream app secret. The Durable Object Worker needs **no** secret.
 3. **IP rate limiting** is handled by the dedicated **rolling-window** `IpRateLimitDO` (Pages binding
    `IP_RATE_LIMIT_DO`, exported by `collier-verification-do`; server-defined per-route policies) —
    entitlement-independent and fail-closed; no external rate-limit binding to confirm.
-4. **Deploy order:** the DO Worker first (`cd auth/verification-do && wrangler deploy`), then the
-   Pages project (`cd auth/pages && wrangler pages deploy public`) so the `script_name` binding
-   resolves. Remove/confirm-excluded any local-only harness. Deploying auth does not touch the
-   chat app; roll back by not cutting the app over (Phase 4).
+4. **Deploy order (used, and to reproduce a re-deploy):** the DO Worker first
+   (`cd auth/verification-do && wrangler deploy`), then the Pages project
+   (`cd auth/pages && wrangler pages deploy public`) so the `script_name` binding resolves. Deploying
+   auth does not touch the chat app.
 
 Phase 3 does **not** change the chat app, the old token Worker, or the GitHub Pages publication
-model, and does not resolve the raw-`user_id` impersonation vulnerability.
+model, and does not resolve the raw-`user_id` impersonation vulnerability (that closes at Phase 4/5).

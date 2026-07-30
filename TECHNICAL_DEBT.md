@@ -52,11 +52,13 @@ inspection script enforces the SDK boundary.
 2. **Unrestricted token-worker `user_id` minting.** `cloudflare-workers/token-worker.js`
    still issues a token for any supplied `user_id` without proving the caller owns that
    identity. **Still OPEN.** The Verified Identity Foundation is closing it: Phase 3
-   (branch `vif-phase3-auth-routes`) implemented the authenticated replacement at
-   `auth/pages/` (`/verify/*`, `/token`, `/logout`; session-derived Stream ID), but it is
-   **not deployed and the chat app has not cut over**, so the old Worker remains live and
-   this vulnerability is **NOT resolved**. It closes only when the app cuts over to the
-   authenticated `/token` (Phase 4) and the old Worker is retired (Phase 5).
+   (`auth/pages/` + `auth/verification-do/`) implemented the authenticated replacement
+   (`/verify/*`, `/token`, `/logout`; session-derived Stream ID) and it is now **deployed to
+   production and validated independently** (auth service at `auth.mentalhealthmadesimple.life`;
+   full browser matrix passed — see `PROJECT_KNOWLEDGE.md`). **However the chat app has NOT cut
+   over**, so the old Worker remains live and this vulnerability is **NOT resolved**. It closes
+   only when the app cuts over to the authenticated `/token` (Phase 4) and the old Worker is
+   retired (Phase 5).
 
 3. **Declared QA actor IDs are not authentication.** Following from (2), the QA actor is an
    operational convention enforced by the tooling. It must never be described as an
@@ -78,3 +80,24 @@ inspection script enforces the SDK boundary.
 **Fix, when the trade-off changes:** provision a separate Stream application for QA and point
 local builds at its API key, which converts items 1, 4 and 5 from policy enforcement into a
 credential boundary that cannot be bypassed by a careless script.
+
+## VIF Phase 3 — logout is not server-side session revocation (stateless sessions)
+
+The Phase 3 session is a **stateless signed token** (`__Host-collier_session`, HMAC-SHA256,
+`sub`/`iat`/`exp=iat+30d`/`ver`). There is no server-side session store or revocation list.
+`/logout` clears the browser cookie (`Max-Age=0`) and, once cleared, subsequent `/token` calls
+return `401` — but a **previously captured pre-logout token remains valid until its fixed 30-day
+expiry**, because the server only checks the signature and `exp`. This was explicitly observed
+during production validation (re-presenting a captured pre-logout cookie still returned `200`).
+
+**Risk is reduced by the cookie attributes:** `HttpOnly` prevents JavaScript, including typical XSS,
+from directly reading the cookie value; `Secure` restricts transmission to HTTPS; and `SameSite=Lax`
+limits cross-site sending. These controls reduce cookie-exfiltration and replay risk but do not
+eliminate session abuse. A compromised browser or device, malicious extension, exposed browser
+profile, debugging access, or another cookie-capture path could still obtain or use a valid session.
+The fixed 30-day replay window is the accepted trade-off for the current phase.
+
+**Fix, if the trade-off changes (do NOT change the architecture without review):** options include
+a server-side revocation list / session-version check in the DO, shorter token lifetime with
+refresh, or a rotating `ver` claim. Any change is a separately reviewed decision, not part of the
+current deployment.
