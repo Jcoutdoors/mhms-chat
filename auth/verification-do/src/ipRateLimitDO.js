@@ -1,11 +1,12 @@
-// IpRateLimitDO — fixed-window IP rate limiter Durable Object (VIF Phase 3).
+// IpRateLimitDO — trailing rolling-window IP rate limiter Durable Object (Phase 3).
 //
 // Reached ONLY via its binding from the auth Pages Functions (no public route).
 // Addressed by an opaque IP-derived name computed upstream; this class never
-// receives or stores the raw IP — only the window counter. Classic `fetch` style
-// so it is unit-testable with an in-memory storage mock.
+// receives or stores the raw IP — only per-policy timestamp arrays. Classic
+// `fetch` style so it is unit-testable with an in-memory storage mock. The DO
+// selects from SERVER-DEFINED policies; the caller sends only a policy name.
 
-import { defaultWindow, hit } from './ipRateLimitLogic.js';
+import { defaultState, isKnownPolicy, hit } from './ipRateLimitLogic.js';
 
 const KEY = 'w';
 
@@ -15,7 +16,8 @@ export class IpRateLimitDO {
     this.env = env;
   }
 
-  // Internal RPC: { op: 'hit', limit, periodMs }. `now` is server-authoritative.
+  // Internal RPC: { op: 'hit', policy: 'verify_request' | 'verify_submit' }.
+  // `now` is server-authoritative. No caller-supplied timestamp or limits.
   async fetch(request) {
     let body;
     try {
@@ -23,16 +25,13 @@ export class IpRateLimitDO {
     } catch {
       return json({ allowed: false, reason: 'bad_request' }, 400);
     }
-    if (!body || body.op !== 'hit') return json({ allowed: false, reason: 'bad_request' }, 400);
-    const limit = Number(body.limit);
-    const periodMs = Number(body.periodMs);
-    if (!Number.isFinite(limit) || limit <= 0 || !Number.isFinite(periodMs) || periodMs <= 0) {
+    if (!body || body.op !== 'hit' || typeof body.policy !== 'string' || !isKnownPolicy(body.policy)) {
       return json({ allowed: false, reason: 'bad_request' }, 400);
     }
-    const cur = (await this.state.storage.get(KEY)) || defaultWindow();
-    const { state, allowed } = hit(cur, Date.now(), limit, periodMs);
+    const cur = (await this.state.storage.get(KEY)) || defaultState();
+    const { state, allowed, retryAfterMs } = hit(cur, Date.now(), body.policy);
     await this.state.storage.put(KEY, state);
-    return json({ allowed });
+    return json({ allowed, retryAfterMs });
   }
 }
 
