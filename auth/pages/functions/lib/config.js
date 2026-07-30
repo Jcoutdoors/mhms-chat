@@ -21,16 +21,15 @@ export const AUTH_CONFIG = {
     maxAttempts: 5,
   },
 
-  // IP-level request limiting (applied in the Pages Functions layer).
+  // IP-level request limiting: trailing rolling windows enforced by a dedicated
+  // Durable Object (IP_RATE_LIMIT_DO), keyed by an opaque HMAC of the trusted IP
+  // using the dedicated IP_RATE_LIMIT_KEY_SECRET. FAIL CLOSED if unavailable.
+  // The thresholds are SERVER-DEFINED in the DO (see ipRateLimitLogic POLICIES:
+  // verify_request 5/60s + 20/60m; verify_submit 20/5m + 100/60m). The browser
+  // never supplies limits/policy values. These are coarse defense-in-depth; the
+  // per-identity limits in VerificationDO remain the tighter control.
   ipRateLimit: {
-    // Reasoning: verification is a deliberate, low-frequency action. ~5 requests
-    // per 60s per IP absorbs honest retries/typos across a couple of people
-    // behind one NAT while stopping obvious scripted abuse. Per-identity limits
-    // (cooldown/hourly) in the DO are the tighter control; this is coarse IP
-    // defense-in-depth.
-    limit: 5,
-    periodSeconds: 60,
-    bindingName: 'AUTH_IP_LIMITER',
+    bindingName: 'IP_RATE_LIMIT_DO',
   },
 
   // Branded verification email (MHMS). from-domain must be verified in Resend

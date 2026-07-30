@@ -22,16 +22,21 @@ function corsHeaders() {
   };
 }
 
-// JSON response for an APPROVED-origin request. Optionally attaches a Set-Cookie.
-export function jsonApproved(obj, { status = 200, setCookie } = {}) {
+// JSON response for an APPROVED-origin request. Optionally attaches a Set-Cookie
+// and/or a Retry-After header (seconds, from a retryAfterMs).
+export function jsonApproved(obj, { status = 200, setCookie, retryAfterMs } = {}) {
   const headers = { 'Content-Type': 'application/json', ...SECURITY_HEADERS, ...corsHeaders() };
   if (setCookie) headers['Set-Cookie'] = setCookie;
+  if (typeof retryAfterMs === 'number' && retryAfterMs > 0) {
+    headers['Retry-After'] = String(Math.ceil(retryAfterMs / 1000));
+  }
   return new Response(JSON.stringify(obj), { status, headers });
 }
 
-// Stable, minimal client-facing error shape.
-export function errorApproved(error, status) {
-  return jsonApproved({ ok: false, error }, { status });
+// Stable, minimal client-facing error shape. `opts.retryAfterMs` adds Retry-After
+// (used for 429). The body never carries counters/timestamps/thresholds/state.
+export function errorApproved(error, status, opts = {}) {
+  return jsonApproved({ ok: false, error }, { status, retryAfterMs: opts.retryAfterMs });
 }
 
 // Rejection for missing/unapproved Origin: 403, NO ACAO, NO Set-Cookie, no detail.

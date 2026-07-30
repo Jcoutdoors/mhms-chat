@@ -17,6 +17,7 @@ import { checkIpRateLimit } from '../functions/lib/ratelimit.js';
 import { emailToUserId } from '../functions/lib/identity.js';
 import { AUTH_CONFIG } from '../functions/lib/config.js';
 import * as vlogic from '../../verification-do/src/verificationLogic.js';
+import * as iplogic from '../../verification-do/src/ipRateLimitLogic.js';
 
 const OK = 'https://chat.mentalhealthmadesimple.life';
 const BAD = 'https://evil.example';
@@ -49,19 +50,53 @@ function makeMockDO(received) {
     },
   };
 }
-function makeEnv(extra = {}) {
+// IP limiter mock namespace backed by the real rolling-window logic. Records the
+// object name(s) it was addressed by (so tests can assert IP-identity behavior).
+function makeIpDO(seenNames) {
+  const store = new Map();
   return {
+    idFromName(name) { if (seenNames) seenNames.add(name); return { name }; },
+    get(id) {
+      const name = id.name;
+      return {
+        async fetch(_u, init) {
+          const b = JSON.parse(init.body);
+          const cur = store.get(name) || iplogic.defaultState();
+          const { state, allowed, retryAfterMs } = iplogic.hit(cur, Date.now(), b.policy);
+          store.set(name, state);
+          return new Response(JSON.stringify({ allowed, retryAfterMs }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        },
+      };
+    },
+  };
+}
+// Permissive limiter (always allow) so identity-focused tests aren't IP-limited.
+function alwaysAllowIpDO() {
+  return {
+    idFromName: (n) => ({ name: n }),
+    get: () => ({ async fetch() { return new Response(JSON.stringify({ allowed: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }); } }),
+  };
+}
+function makeEnv(extra = {}) {
+  const env = {
     IDENTITY_KEY_SECRET: 'test-identity-secret',
     CODE_HMAC_SECRET: 'test-code-secret',
     SESSION_SIGNING_SECRET: 'test-session-secret',
     STREAM_SECRET: 'test-stream-secret',
     RESEND_API_KEY: 'test-resend-key',
+    IP_RATE_LIMIT_KEY_SECRET: 'test-ip-secret',
     VERIFICATION_DO: makeMockDO(extra._received),
-    ...extra,
   };
+  // Default IP limiter is permissive. Pass IP_RATE_LIMIT_DO:null to simulate an
+  // unavailable binding (fail-closed), or a real makeIpDO() to exercise limits.
+  if (!('IP_RATE_LIMIT_DO' in extra)) env.IP_RATE_LIMIT_DO = alwaysAllowIpDO();
+  for (const [k, v] of Object.entries(extra)) { if (k !== '_received') env[k] = v; }
+  return env;
 }
-function req(method, { origin, body, cookie, ip = '203.0.113.5' } = {}) {
-  const headers = { 'CF-Connecting-IP': ip };
+function req(method, { origin, body, cookie, ip = '203.0.113.5', xff, noIp } = {}) {
+  const headers = {};
+  if (!noIp && ip !== null) headers['CF-Connecting-IP'] = ip;
+  if (xff !== undefined) headers['X-Forwarded-For'] = xff; // must be IGNORED by the adapter
   if (origin !== undefined) headers.Origin = origin;
   if (cookie) headers.Cookie = cookie;
   const init = { method, headers };
@@ -294,19 +329,113 @@ test('/token: tampered/expired session -> 401; browser-supplied user_id ignored'
   assert.equal(noCookie.status, 401);
 });
 
-// ---------- rate-limit adapter ----------
-test('rate-limit adapter: enforces when binding present; unenforced when absent', async () => {
-  const blocked = await checkIpRateLimit({ AUTH_IP_LIMITER: { limit: async () => ({ success: false }) } }, req('POST', { origin: OK }));
-  assert.deepEqual(blocked, { allowed: false, enforced: true });
-  const allowed = await checkIpRateLimit({ AUTH_IP_LIMITER: { limit: async () => ({ success: true }) } }, req('POST', { origin: OK }));
-  assert.deepEqual(allowed, { allowed: true, enforced: true });
-  const absent = await checkIpRateLimit({}, req('POST', { origin: OK }));
-  assert.deepEqual(absent, { allowed: true, enforced: false });
+// ---------- rate-limit adapter (rolling-window, dedicated secret, fail-closed) ----------
+test('rate-limit adapter: allowed under policy, rate_limited over, with retryAfterMs', async () => {
+  const env = { IP_RATE_LIMIT_KEY_SECRET: 's', IP_RATE_LIMIT_DO: makeIpDO() };
+  for (let i = 0; i < 5; i++) { // verify_request 60s policy = 5
+    assert.deepEqual(await checkIpRateLimit(env, req('POST', { ip: '9.9.9.9' }), 'verify_request'), { allowed: true, reason: 'ok' });
+  }
+  const over = await checkIpRateLimit(env, req('POST', { ip: '9.9.9.9' }), 'verify_request');
+  assert.equal(over.allowed, false);
+  assert.equal(over.reason, 'rate_limited');
+  assert.ok(over.retryAfterMs > 0);
 });
-test('verify/request: IP limiter blocks -> rate_limited', async () => {
-  const env = makeEnv({ AUTH_IP_LIMITER: { limit: async () => ({ success: false }) } });
-  const res = await request.onRequestPost({ request: req('POST', { origin: OK, body: { email: 'a@b.com' } }), env });
-  assert.equal(res.status, 429);
+
+test('rate-limit adapter: FAIL CLOSED on missing secret / missing binding / missing IP / limiter error', async () => {
+  const ok = req('POST', { ip: '9.9.9.9' });
+  // missing dedicated secret
+  assert.deepEqual(await checkIpRateLimit({ IP_RATE_LIMIT_DO: makeIpDO() }, ok, 'verify_request'), { allowed: false, reason: 'unavailable' });
+  // missing binding
+  assert.deepEqual(await checkIpRateLimit({ IP_RATE_LIMIT_KEY_SECRET: 's' }, ok, 'verify_request'), { allowed: false, reason: 'unavailable' });
+  // missing trusted IP
+  assert.deepEqual(await checkIpRateLimit({ IP_RATE_LIMIT_KEY_SECRET: 's', IP_RATE_LIMIT_DO: makeIpDO() }, req('POST', { noIp: true }), 'verify_request'), { allowed: false, reason: 'unavailable' });
+  // limiter error
+  const errEnv = { IP_RATE_LIMIT_KEY_SECRET: 's', IP_RATE_LIMIT_DO: { idFromName: () => ({}), get: () => ({ fetch: async () => { throw new Error('down'); } }) } };
+  assert.deepEqual(await checkIpRateLimit(errEnv, ok, 'verify_request'), { allowed: false, reason: 'unavailable' });
+});
+
+test('rate-limit adapter: opaque key depends on IP and on IP_RATE_LIMIT_KEY_SECRET; uses only CF-Connecting-IP', async () => {
+  const names = new Set();
+  const env = { IP_RATE_LIMIT_KEY_SECRET: 's1', IP_RATE_LIMIT_DO: makeIpDO(names) };
+  await checkIpRateLimit(env, req('POST', { ip: '1.1.1.1', xff: '9.9.9.9' }), 'verify_request');
+  await checkIpRateLimit(env, req('POST', { ip: '2.2.2.2', xff: '1.1.1.1' }), 'verify_request');
+  // X-Forwarded-For is ignored: the two names come from the two DISTINCT CF-Connecting-IPs.
+  assert.equal(names.size, 2);
+  // Same IP, different secret -> different opaque name.
+  const n1 = new Set(); await checkIpRateLimit({ IP_RATE_LIMIT_KEY_SECRET: 'A', IP_RATE_LIMIT_DO: makeIpDO(n1) }, req('POST', { ip: '5.5.5.5' }), 'verify_request');
+  const n2 = new Set(); await checkIpRateLimit({ IP_RATE_LIMIT_KEY_SECRET: 'B', IP_RATE_LIMIT_DO: makeIpDO(n2) }, req('POST', { ip: '5.5.5.5' }), 'verify_request');
+  assert.notDeepEqual([...n1], [...n2]);
+});
+
+test('rate-limit adapter: does NOT use IDENTITY_KEY_SECRET', async () => {
+  // With the dedicated secret absent but IDENTITY_KEY_SECRET present, it must fail closed
+  // (proves the adapter no longer falls back to IDENTITY_KEY_SECRET).
+  const env = { IDENTITY_KEY_SECRET: 'identity', IP_RATE_LIMIT_DO: makeIpDO() };
+  assert.deepEqual(await checkIpRateLimit(env, req('POST', { ip: '9.9.9.9' }), 'verify_request'), { allowed: false, reason: 'unavailable' });
+});
+
+// ---------- route integration: fail-closed, policy, Retry-After, no downstream work ----------
+test('verify/request + /verify/submit: FAIL CLOSED (503) when IP binding absent or secret missing', async () => {
+  for (const extra of [{ IP_RATE_LIMIT_DO: null }, { IP_RATE_LIMIT_KEY_SECRET: undefined }]) {
+    const env = makeEnv(extra);
+    if ('IP_RATE_LIMIT_KEY_SECRET' in extra) delete env.IP_RATE_LIMIT_KEY_SECRET;
+    const r = await request.onRequestPost({ request: req('POST', { origin: OK, body: { email: 'a@b.com' } }), env });
+    assert.equal(r.status, 503);
+    const s = await submit.onRequestPost({ request: req('POST', { origin: OK, body: { email: 'a@b.com', code: '123456' } }), env });
+    assert.equal(s.status, 503);
+  }
+});
+
+test('verify/request: over the 5/60s policy -> 429 with Retry-After; downstream NOT reached', async () => {
+  const received = [];
+  const env = makeEnv({ IP_RATE_LIMIT_DO: makeIpDO(), LOCAL_EMAIL_CAPTURE: '1', _received: received });
+  const ip = '198.51.100.7';
+  for (let i = 0; i < 5; i++) {
+    const r = await request.onRequestPost({ request: req('POST', { origin: OK, ip, body: { email: `u${i}@x.com` } }), env });
+    assert.notEqual(r.status, 429);
+  }
+  const receivedBefore = received.length;
+  const blocked = await request.onRequestPost({ request: req('POST', { origin: OK, ip, body: { email: 'u9@x.com' } }), env });
+  assert.equal(blocked.status, 429);
+  assert.equal((await blocked.json()).error, 'rate_limited');
+  assert.ok(blocked.headers.get('Retry-After'), 'Retry-After present');
+  assert.equal(received.length, receivedBefore, 'rate-limited request did NOT reach VerificationDO');
+});
+
+test('verify/submit: over the 20/5m policy -> 429; VerificationDO not reached on the blocked call', async () => {
+  const received = [];
+  const env = makeEnv({ IP_RATE_LIMIT_DO: makeIpDO(), _received: received });
+  const ip = '198.51.100.9';
+  for (let i = 0; i < 20; i++) {
+    await submit.onRequestPost({ request: req('POST', { origin: OK, ip, body: { email: 'a@b.com', code: '000000' } }), env });
+  }
+  const before = received.length;
+  const blocked = await submit.onRequestPost({ request: req('POST', { origin: OK, ip, body: { email: 'a@b.com', code: '000000' } }), env });
+  assert.equal(blocked.status, 429);
+  assert.equal(received.length, before, 'rate-limited submit did NOT reach VerificationDO / decrement attempts');
+});
+
+test('verify/request: request-route limit does not consume the submit-route allowance (same IP)', async () => {
+  const env = makeEnv({ IP_RATE_LIMIT_DO: makeIpDO(), LOCAL_EMAIL_CAPTURE: '1' });
+  const ip = '198.51.100.11';
+  for (let i = 0; i < 5; i++) await request.onRequestPost({ request: req('POST', { origin: OK, ip, body: { email: `q${i}@x.com` } }), env });
+  assert.equal((await request.onRequestPost({ request: req('POST', { origin: OK, ip, body: { email: 'q9@x.com' } }), env })).status, 429);
+  // submit route (different policy) still available for the same IP
+  const s = await submit.onRequestPost({ request: req('POST', { origin: OK, ip, body: { email: 'a@b.com', code: '000000' } }), env });
+  assert.notEqual(s.status, 429);
+});
+
+test('verify/request: X-Forwarded-For cannot change the limiter identity', async () => {
+  const env = makeEnv({ IP_RATE_LIMIT_DO: makeIpDO(), LOCAL_EMAIL_CAPTURE: '1' });
+  const ip = '198.51.100.13';
+  // 5 allowed for this CF-Connecting-IP even though X-Forwarded-For varies each call
+  for (let i = 0; i < 5; i++) {
+    const r = await request.onRequestPost({ request: req('POST', { origin: OK, ip, xff: `10.0.0.${i}`, body: { email: `z${i}@x.com` } }), env });
+    assert.notEqual(r.status, 429);
+  }
+  // 6th (same CF IP, new XFF) is still blocked -> XFF did not create a fresh identity
+  const blocked = await request.onRequestPost({ request: req('POST', { origin: OK, ip, xff: '10.0.0.99', body: { email: 'z9@x.com' } }), env });
+  assert.equal(blocked.status, 429);
 });
 
 // ---------- email adapter ----------

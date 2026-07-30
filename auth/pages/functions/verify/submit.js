@@ -5,6 +5,7 @@ import { hmacSha256Hex } from '../lib/crypto.js';
 import { deriveObjectName, submitCode } from '../lib/verificationClient.js';
 import { createSession } from '../lib/session.js';
 import { setSessionCookie } from '../lib/cookie.js';
+import { checkIpRateLimit } from '../lib/ratelimit.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CODE_RE = /^\d{6}$/;
@@ -14,6 +15,14 @@ export function onRequestOptions(context) { return preflight(context.request, 'P
 export async function onRequestPost(context) {
   const { request, env } = context;
   if (!isApprovedOrigin(request)) return rejectOrigin();
+
+  const rl = await checkIpRateLimit(env, request, 'verify_submit'); // fail closed
+  if (!rl.allowed) {
+    // No VerificationDO call, no code HMAC, no attempt decrement beyond this point.
+    return rl.reason === 'unavailable'
+      ? errorApproved('service_unavailable', 503)
+      : errorApproved('rate_limited', 429, { retryAfterMs: rl.retryAfterMs });
+  }
 
   const body = await readJson(request);
   if (!body || typeof body.email !== 'string' || typeof body.code !== 'string') {

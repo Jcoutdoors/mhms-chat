@@ -8,13 +8,24 @@ compatibility_date = "2026-07-29"
 pages_build_output_dir = "public"
 # Pages Functions are auto-discovered from ./functions
 
-# External Durable Object binding: the VerificationDO class is exported by the
-# separate Worker deployed from auth/verification-do/ (script name below).
+# External Durable Object bindings: both classes are exported by the separate
+# Worker deployed from auth/verification-do/ (script name below).
 [[durable_objects.bindings]]
 name = "VERIFICATION_DO"
 class_name = "VerificationDO"
 script_name = "collier-verification-do"
 
+# IP rate limiter (fail-closed): /verify/* refuse service if this binding is
+# absent. Keyed by an opaque HMAC(clientIP) name; the DO stores only window state.
+[[durable_objects.bindings]]
+name = "IP_RATE_LIMIT_DO"
+class_name = "IpRateLimitDO"
+script_name = "collier-verification-do"
+
 # Phase 3 will add these as Cloudflare secrets (names only; never committed):
-#   IDENTITY_KEY_SECRET, CODE_HMAC_SECRET, SESSION_SIGNING_SECRET,
-#   STREAM_SECRET, RESEND_API_KEY
+#   IDENTITY_KEY_SECRET       -> opaque VerificationDO name (identity)
+#   CODE_HMAC_SECRET          -> code HMAC
+#   SESSION_SIGNING_SECRET    -> session signing
+#   STREAM_SECRET             -> Stream token minting
+#   RESEND_API_KEY            -> email delivery
+#   IP_RATE_LIMIT_KEY_SECRET  -> opaque IP-rate-limit DO name (dedicated; NOT IDENTITY_KEY_SECRET)

@@ -7,6 +7,7 @@
 // public HTTP call to this Worker.
 
 export { VerificationDO } from './verificationDO.js';
+export { IpRateLimitDO } from './ipRateLimitDO.js';
 
 export default {
   async fetch() {
