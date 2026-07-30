@@ -1,0 +1,14 @@
+{
+  "name": "collier-verification-do",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "VIF Phase 2 — Durable Object for strongly consistent verification-code state. Not deployed.",
+  "scripts": {
+    "test": "node --test test/verificationLogic.test.mjs test/verificationDO.test.mjs",
+    "validate": "wrangler deploy --dry-run --outdir=.dryrun"
+  },
+  "devDependencies": {
+    "wrangler": "^4.115.0"
+  }
+}

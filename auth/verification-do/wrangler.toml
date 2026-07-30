@@ -1,0 +1,32 @@
+# Durable Object Worker — VIF Phase 2 (version-controlled, NOT deployed in Phase 2).
+#
+# This Worker only exports the VerificationDO class and services the binding for
+# the auth Pages project. It has no public route. Deploy requires explicit
+# approval (see auth/README.md). No secret VALUES appear here — only names.
+
+name = "collier-verification-do"
+main = "src/index.js"
+compatibility_date = "2026-07-29"
+
+# Declare the Durable Object class this Worker exports.
+[[durable_objects.bindings]]
+name = "VERIFICATION_DO"
+class_name = "VerificationDO"
+
+# SQLite-backed Durable Objects (available on the Workers free plan).
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["VerificationDO"]
+
+# The Durable Object stores only opaque HMACs + timestamps/counters. It does NOT
+# hold any secret: the code HMAC is computed upstream in the Pages Function (see
+# the HMAC-ownership decision in auth/README.md), so this Worker needs no
+# CODE_HMAC_SECRET binding.
+#
+# Secrets referenced elsewhere in the auth system (names only; provisioned by
+# the product owner via `wrangler secret put`, never committed):
+#   IDENTITY_KEY_SECRET   -> Pages Function (derives the opaque DO name)
+#   CODE_HMAC_SECRET      -> Pages Function (computes code HMAC)
+#   SESSION_SIGNING_SECRET-> Pages Function (Phase 3 sessions)
+#   STREAM_SECRET         -> Pages Function (Phase 3 /token)
+#   RESEND_API_KEY        -> Pages Function (Phase 3 email delivery)
