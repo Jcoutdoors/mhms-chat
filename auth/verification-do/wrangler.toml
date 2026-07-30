@@ -8,15 +8,25 @@ name = "collier-verification-do"
 main = "src/index.js"
 compatibility_date = "2026-07-29"
 
-# Declare the Durable Object class this Worker exports.
+# Declare the Durable Object classes this Worker exports.
 [[durable_objects.bindings]]
 name = "VERIFICATION_DO"
 class_name = "VerificationDO"
+
+# Fixed-window IP rate limiter (Phase 3). Same Worker, separate class; reached
+# only via its binding from the auth Pages Functions. Stores only window state.
+[[durable_objects.bindings]]
+name = "IP_RATE_LIMIT_DO"
+class_name = "IpRateLimitDO"
 
 # SQLite-backed Durable Objects (available on the Workers free plan).
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["VerificationDO"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["IpRateLimitDO"]
 
 # The Durable Object stores only opaque HMACs + timestamps/counters. It does NOT
 # hold any secret: the code HMAC is computed upstream in the Pages Function (see
