@@ -286,3 +286,27 @@ The shipped config (Mark, `cats-announcements`) and the QA guardrails (only `cat
 
 Do NOT point `featuredUpdates` at QA channels/authors to force a synthetic end-to-end test,
 and do NOT weaken `retainConfiguredChannels()`, the QA guard, or QA fixture membership.
+
+---
+
+## Verified Identity Foundation — auth deploy prerequisites (Phase 3; NOT yet deployed)
+
+The auth service (`auth/pages/` + `auth/verification-do/`) is implemented but **not deployed**,
+and the live chat still uses the old token Worker. Before any approved deploy:
+
+1. **Resend branded domain (BLOCKER):** verify `send.mentalhealthmadesimple.life` in the auth
+   Resend account and add the Resend-provided DNS records at Squarespace/NS1 (SPF TXT on `send`,
+   DKIM `resend._domainkey`, MX → `feedback-smtp.us-east-1.amazonses.com`, optional DMARC).
+   Create an **auth-specific** `RESEND_API_KEY`. Do not fall back to `notifications.nexgenrva.com`.
+2. **Secrets** (`auth/pages/` only; never committed) via `wrangler pages secret put <NAME>`:
+   `IDENTITY_KEY_SECRET`, `CODE_HMAC_SECRET`, `SESSION_SIGNING_SECRET`, `STREAM_SECRET`,
+   `RESEND_API_KEY`. The Durable Object Worker needs **no** secret.
+3. **Confirm the `AUTH_IP_LIMITER` (Workers Rate Limiting) binding** is available on the account;
+   if not, wire the IP-keyed Durable Object fallback.
+4. **Deploy order:** the DO Worker first (`cd auth/verification-do && wrangler deploy`), then the
+   Pages project (`cd auth/pages && wrangler pages deploy public`) so the `script_name` binding
+   resolves. Remove/confirm-excluded any local-only harness. Deploying auth does not touch the
+   chat app; roll back by not cutting the app over (Phase 4).
+
+Phase 3 does **not** change the chat app, the old token Worker, or the GitHub Pages publication
+model, and does not resolve the raw-`user_id` impersonation vulnerability.

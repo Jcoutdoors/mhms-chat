@@ -51,7 +51,12 @@ inspection script enforces the SDK boundary.
 
 2. **Unrestricted token-worker `user_id` minting.** `cloudflare-workers/token-worker.js`
    still issues a token for any supplied `user_id` without proving the caller owns that
-   identity. Unchanged by this work, and deliberately out of scope.
+   identity. **Still OPEN.** The Verified Identity Foundation is closing it: Phase 3
+   (branch `vif-phase3-auth-routes`) implemented the authenticated replacement at
+   `auth/pages/` (`/verify/*`, `/token`, `/logout`; session-derived Stream ID), but it is
+   **not deployed and the chat app has not cut over**, so the old Worker remains live and
+   this vulnerability is **NOT resolved**. It closes only when the app cuts over to the
+   authenticated `/token` (Phase 4) and the old Worker is retired (Phase 5).
 
 3. **Declared QA actor IDs are not authentication.** Following from (2), the QA actor is an
    operational convention enforced by the tooling. It must never be described as an
