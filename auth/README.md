@@ -80,9 +80,15 @@ SameSite=Lax; Path=/; Max-Age=2592000` (no `Domain`).
 
 ### Secret boundary
 `auth/pages/` receives `IDENTITY_KEY_SECRET`, `CODE_HMAC_SECRET`, `SESSION_SIGNING_SECRET`,
-`STREAM_SECRET`, `RESEND_API_KEY` (provision via `wrangler pages secret put <NAME>`).
-`auth/verification-do/` receives **no** production secret (it stores/compares HMACs only).
-Values are never committed; tests use deterministic test-only values.
+`STREAM_SECRET`, `RESEND_API_KEY`, and **`IP_RATE_LIMIT_KEY_SECRET`** (provision via
+`wrangler pages secret put <NAME>`). `IP_RATE_LIMIT_KEY_SECRET` is **dedicated** to the opaque
+IP-rate-limit DO routing name (`HMAC-SHA256(trustedIP, IP_RATE_LIMIT_KEY_SECRET)`) — separate from
+`IDENTITY_KEY_SECRET` so the two routing namespaces are cryptographically independent. Generate ≥256
+bits (`openssl rand -hex 32`). **Rotation effect:** rotating it changes every IP limiter object
+identity, so current IP rate-limit counters reset (a brief loosening) — **no effect** on verified
+identity routing, active verification codes, or sessions. `auth/verification-do/` receives **no**
+production secret (it stores/compares opaque values only). Values are never committed; tests use
+deterministic test-only values.
 
 ### Email (branded) — DEPLOY BLOCKER until verified
 Preferred sender `verification@send.mentalhealthmadesimple.life`. As of implementation the
@@ -93,18 +99,34 @@ on `send`, DKIM `resend._domainkey`, MX `feedback-smtp…amazonses.com`, optiona
 (3) create an **auth-specific** `RESEND_API_KEY`. Do NOT silently fall back to
 `notifications.nexgenrva.com`. Email is tested here only with a mock transport / local capture.
 
-### IP rate limiting (dedicated Durable Object, FAIL CLOSED)
+### IP rate limiting (dedicated Durable Object, TRUE ROLLING WINDOWS, FAIL CLOSED)
 Both `/verify/request` and `/verify/submit` call `checkIpRateLimit` first. It uses a dedicated
-fixed-window Durable Object **`IpRateLimitDO`** (exported by the same `collier-verification-do`
-Worker; bound to Pages as `IP_RATE_LIMIT_DO`), keyed on the **trusted `CF-Connecting-IP`** only
-(never `X-Forwarded-For`). The DO is addressed by an **opaque `HMAC-SHA256(clientIP,
-IDENTITY_KEY_SECRET)`** name and stores **only** `{ windowStart, count }` — never the raw IP.
-Limit **5 / 60s** per IP (coarse defense-in-depth; the per-identity cooldown/hourly limits in
-`VerificationDO` remain the tighter control). **Fail closed:** if the `IP_RATE_LIMIT_DO` binding
-is unavailable, the trusted IP is missing, or the limiter call errors, the verify routes return
-`service_unavailable` (503) rather than run unprotected. The earlier experimental fail-open
-`AUTH_IP_LIMITER` (Workers Rate Limiting binding) path was **removed** — no entitlement dependency.
-This entitlement-independent DO limiter is deployable now (no KV; no public endpoint).
+**trailing rolling-window** Durable Object **`IpRateLimitDO`** (exported by the same
+`collier-verification-do` Worker; bound to Pages as `IP_RATE_LIMIT_DO`), keyed on the **trusted
+`CF-Connecting-IP`** only (never `X-Forwarded-For`, never a JSON/query IP). The DO is addressed by
+an **opaque `HMAC-SHA256(clientIP, IP_RATE_LIMIT_KEY_SECRET)`** name (a **dedicated** secret — NOT
+`IDENTITY_KEY_SECRET`) and stores **only** per-policy timestamp arrays — never the raw IP.
+
+**Rolling windows, not fixed buckets:** on each hit the DO prunes timestamps older than the
+longest window, counts those inside each trailing window relative to `Date.now()`, and rejects if
+adding the hit would exceed any threshold (so 5 just before and 1 just after a wall-clock minute
+are counted together — no bucket reset). On reject it returns the most conservative `retryAfterMs`
+(→ `Retry-After` header on the 429). The public route passes only a **server-defined policy name**
+(`verify_request` / `verify_submit`); the browser cannot choose limits or policy values.
+
+**Server-defined policies** (in `ipRateLimitLogic.js`; per-route counters are isolated):
+- `verify_request`: **5 / trailing 60s** and **20 / trailing 60m**
+- `verify_submit`: **20 / trailing 5m** and **100 / trailing 60m**
+
+These are coarse IP defense-in-depth; the per-identity `VerificationDO` limits (exclusive pending
+issuance, 60s resend cooldown, 3 sends/rolling hour, 5 attempts, 10-min expiry, one-time use)
+remain the tighter control and are unchanged. **Fail closed:** if `IP_RATE_LIMIT_KEY_SECRET` is
+missing, the `IP_RATE_LIMIT_DO` binding is missing, the trusted IP is missing, or the limiter call
+errors, the verify routes return `service_unavailable` (503) rather than run unprotected. A
+rate-limited request never reaches `VerificationDO`, mints/HMACs no code, sends no email, reserves
+no issuance, decrements no attempts, and creates no session/Stream token. The earlier experimental
+fail-open `AUTH_IP_LIMITER` (Workers Rate Limiting binding) path was **removed**. Entitlement-
+independent (no KV; no public endpoint).
 
 ### Local integration proof
 `functions/__do-binding-check.js` (Phase 2) has been **removed**. Full-flow local proof uses
@@ -144,7 +166,7 @@ app's GitHub Pages pipeline.
   will live here. **Not implemented.**
 
 **`auth/verification-do/`** — the Worker exporting `VerificationDO` **and `IpRateLimitDO`**
-(fixed-window IP limiter; separate class, same Worker). No public route
+(trailing rolling-window IP limiter; separate class, same Worker). No public route
 (default fetch 404). The Durable Object implementation + tests.
 
 ### Local validation / proof commands (no deploy)
@@ -246,25 +268,27 @@ class_name = "VerificationDO"
 script_name = "collier-verification-do"   # the DO Worker deployed from auth/verification-do/
 ```
 
-## IP rate limiting decision (RESOLVED — dedicated Durable Object, fail closed)
-- **Chosen: a dedicated fixed-window Durable Object `IpRateLimitDO`** (exported by
+## IP rate limiting decision (RESOLVED — dedicated Durable Object, rolling windows, fail closed)
+- **Chosen: a dedicated trailing rolling-window Durable Object `IpRateLimitDO`** (exported by
   `collier-verification-do`; Pages binding `IP_RATE_LIMIT_DO`), keyed on the trusted
-  `CF-Connecting-IP` via an opaque `HMAC-SHA256(clientIP, IDENTITY_KEY_SECRET)` name.
-  Stores only `{ windowStart, count }`. Limit **5 / 60s**. **Entitlement-independent**
-  (works on the Workers free plan alongside `VerificationDO`) and deployable now.
-- **Fail closed:** binding unavailable / missing trusted IP / limiter error →
-  `/verify/*` return `service_unavailable` (503). Never runs unprotected.
+  `CF-Connecting-IP` via an opaque `HMAC-SHA256(clientIP, IP_RATE_LIMIT_KEY_SECRET)` name
+  (dedicated secret, **not** `IDENTITY_KEY_SECRET`). Stores only per-policy timestamp arrays.
+  **Server-defined policies:** `verify_request` 5/60s + 20/60m; `verify_submit` 20/5m + 100/60m.
+  **Entitlement-independent** (Workers free plan alongside `VerificationDO`) and deployable now.
+- **Fail closed:** missing secret / missing binding / missing trusted IP / limiter error →
+  `/verify/*` return `service_unavailable` (503). Never runs unprotected. Rate-limited requests do
+  no downstream work (no VerificationDO, code, email, issuance, attempt decrement, or session).
 - **Removed:** the earlier experimental Cloudflare Workers Rate Limiting binding
-  (`AUTH_IP_LIMITER`, `[[unsafe.bindings]]`, fail-open) — its account entitlement was
-  unconfirmable without a deploy, so it was replaced by the DO limiter above.
+  (`AUTH_IP_LIMITER`, `[[unsafe.bindings]]`, fixed-window/fail-open) — its account entitlement was
+  unconfirmable without a deploy, so it was replaced by the rolling-window DO limiter above.
 - **Not used:** KV (eventually consistent — unsafe for security limits); zone-level
   WAF rate-limiting rules (the domain is not a Cloudflare-managed DNS zone —
   authoritative NS is NS1/Squarespace).
 
 ## Secrets (names only — never committed; provisioned via `wrangler secret put`)
 `IDENTITY_KEY_SECRET`, `CODE_HMAC_SECRET`, `SESSION_SIGNING_SECRET`,
-`STREAM_SECRET`, `RESEND_API_KEY` live on the **Pages Function** (Phase 3). The
-Durable Object Worker requires **no** secret. Phase 2 provisions no production
+`STREAM_SECRET`, `RESEND_API_KEY`, `IP_RATE_LIMIT_KEY_SECRET` live on the **Pages Function**
+(Phase 3). The Durable Object Worker requires **no** secret. Phase 2 provisions no production
 secret values; tests use deterministic test-only secrets.
 
 ## Deployment

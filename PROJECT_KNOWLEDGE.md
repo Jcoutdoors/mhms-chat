@@ -1022,14 +1022,18 @@ alarms). Concurrency safety relies on Durable Object per-instance serialization.
 compares HMACs only. This keeps the plaintext code out of the DO entirely, puts
 `CODE_HMAC_SECRET` in one place (the Pages Function), and leaves the DO needing no secret.
 
-**Rate limiting (decision — RESOLVED):** a dedicated fixed-window **`IpRateLimitDO`** Durable
-Object (exported by `collier-verification-do`; Pages binding `IP_RATE_LIMIT_DO`) protects both
-`/verify/request` and `/verify/submit`, keyed on the trusted `CF-Connecting-IP` via an opaque
-`HMAC-SHA256(clientIP, IDENTITY_KEY_SECRET)` name (stores only `{windowStart,count}`; limit
-5/60s). **Fail closed** (binding unavailable / no trusted IP / limiter error → 503). The earlier
-experimental `AUTH_IP_LIMITER` (Workers Rate Limiting binding, `[[unsafe.bindings]]`, fail-open)
-was **removed** — entitlement-independent and deployable now. **Not used:** KV (eventually
-consistent) or zone WAF rules (domain is not a Cloudflare DNS zone).
+**Rate limiting (decision — RESOLVED):** a dedicated **trailing rolling-window** `IpRateLimitDO`
+Durable Object (exported by `collier-verification-do`; Pages binding `IP_RATE_LIMIT_DO`) protects
+both `/verify/request` and `/verify/submit`, keyed on the trusted `CF-Connecting-IP` via an opaque
+`HMAC-SHA256(clientIP, IP_RATE_LIMIT_KEY_SECRET)` name (a **dedicated** secret, NOT
+`IDENTITY_KEY_SECRET`; stores only per-policy timestamp arrays — no raw IP). **Server-defined
+policies:** `verify_request` 5/60s + 20/60m; `verify_submit` 20/5m + 100/60m (rolling windows, no
+fixed-bucket reset; browser cannot choose limits/policy). **Fail closed** (missing secret / binding
+/ trusted IP / limiter error → 503; rate-limited requests do no downstream work) and returns
+`Retry-After` on 429. The earlier experimental `AUTH_IP_LIMITER` (Workers Rate Limiting binding,
+`[[unsafe.bindings]]`, fixed-window/fail-open) was **removed** — entitlement-independent and
+deployable now. **Not used:** KV (eventually consistent) or zone WAF rules (domain is not a
+Cloudflare DNS zone).
 
 **Tests:** `cd auth/verification-do && npm test` → 15/15 (issuance, expiry, attempts, success/
 single-use, cooldown, rolling-hour, concurrency, security invariants). No network/Stream/
@@ -1085,10 +1089,12 @@ no raw email, no plaintext code, no secret.
 verified in Resend (DEPLOY BLOCKER)**; tested with a mock transport + local capture; no real
 email sent.
 
-**Rate limiting:** dedicated fixed-window `IpRateLimitDO` (Pages binding `IP_RATE_LIMIT_DO`),
-trusted `CF-Connecting-IP`, opaque HMAC key, 5/60s, **fail closed**, entitlement-independent; the
+**Rate limiting:** dedicated **trailing rolling-window** `IpRateLimitDO` (Pages binding
+`IP_RATE_LIMIT_DO`), trusted `CF-Connecting-IP`, opaque HMAC key from the **dedicated**
+`IP_RATE_LIMIT_KEY_SECRET`, server-defined per-route policies (`verify_request` 5/60s + 20/60m;
+`verify_submit` 20/5m + 100/60m), **fail closed** with `Retry-After`, entitlement-independent; the
 per-identity DO cooldown/hourly limits remain the tighter control. (Implemented on branch
-`vif-phase3-ip-ratelimit`; the experimental fail-open `AUTH_IP_LIMITER` path was removed.)
+`vif-phase3-ip-ratelimit`; the experimental fixed-window/fail-open `AUTH_IP_LIMITER` path was removed.)
 
 **Tests:** `auth/pages` 35/35 (CORS, verify request/submit, session, `/token`, logout, DO
 integration via the real Phase 2 logic, email adapter, rate-limit adapter) + full **workerd**

@@ -300,10 +300,11 @@ and the live chat still uses the old token Worker. Before any approved deploy:
    Create an **auth-specific** `RESEND_API_KEY`. Do not fall back to `notifications.nexgenrva.com`.
 2. **Secrets** (`auth/pages/` only; never committed) via `wrangler pages secret put <NAME>`:
    `IDENTITY_KEY_SECRET`, `CODE_HMAC_SECRET`, `SESSION_SIGNING_SECRET`, `STREAM_SECRET`,
-   `RESEND_API_KEY`. The Durable Object Worker needs **no** secret.
-3. **IP rate limiting** is handled by the dedicated `IpRateLimitDO` (Pages binding
-   `IP_RATE_LIMIT_DO`, exported by `collier-verification-do`) — entitlement-independent and
-   fail-closed; no external rate-limit binding to confirm.
+   `RESEND_API_KEY`, and **`IP_RATE_LIMIT_KEY_SECRET`** (dedicated key for the opaque IP-rate-limit
+   DO name; `openssl rand -hex 32`). The Durable Object Worker needs **no** secret.
+3. **IP rate limiting** is handled by the dedicated **rolling-window** `IpRateLimitDO` (Pages binding
+   `IP_RATE_LIMIT_DO`, exported by `collier-verification-do`; server-defined per-route policies) —
+   entitlement-independent and fail-closed; no external rate-limit binding to confirm.
 4. **Deploy order:** the DO Worker first (`cd auth/verification-do && wrangler deploy`), then the
    Pages project (`cd auth/pages && wrangler pages deploy public`) so the `script_name` binding
    resolves. Remove/confirm-excluded any local-only harness. Deploying auth does not touch the
