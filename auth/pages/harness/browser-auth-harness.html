@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>VIF Phase 3 — auth browser harness (test-only, NOT deployed)</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 20px; max-width: 620px; }
+  input, button { font-size: 16px; padding: 8px 10px; }
+  .row { margin: 8px 0; }
+  #log { white-space: pre-wrap; background: #f5f5f7; border: 1px solid #ddd; border-radius: 8px; padding: 10px; margin-top: 12px; }
+  .note { color: #666; font-size: 13px; }
+</style>
+</head>
+<body>
+  <h2>VIF Phase 3 — auth browser harness</h2>
+  <p class="note">TEST-ONLY. Not deployed with the auth Pages project (lives outside <code>public/</code>)
+  and NOT part of the chat app. To use in a future approved test, serve this from the approved
+  chat origin (so requests carry <code>Origin: https://chat.mentalhealthmadesimple.life</code>),
+  then run the steps. It talks only to <code>https://auth.mentalhealthmadesimple.life</code>.</p>
+
+  <div class="row"><input id="email" type="email" placeholder="you@example.com" size="30"></div>
+  <div class="row"><button id="reqBtn">1. Request code</button></div>
+  <div class="row"><input id="code" inputmode="numeric" placeholder="123456" size="10">
+    <button id="subBtn">2. Submit code</button></div>
+  <div class="row">
+    <button id="jsCookieBtn">3. JS cookie check (must be hidden)</button>
+    <button id="tokenBtn">4. /token</button>
+    <button id="logoutBtn">5. Logout</button>
+    <button id="postLogoutBtn">6. /token after logout (expect 401)</button>
+  </div>
+  <div id="log"></div>
+
+<script>
+  const AUTH = 'https://auth.mentalhealthmadesimple.life';
+  const log = (m) => { document.getElementById('log').textContent += m + '\n'; };
+  const email = () => document.getElementById('email').value;
+  async function call(path, body) {
+    const res = await fetch(AUTH + path, {
+      method: 'POST', credentials: 'include',
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    let data; try { data = await res.json(); } catch { data = '(no json)'; }
+    return { status: res.status, data };
+  }
+  document.getElementById('reqBtn').onclick = async () => log('request: ' + JSON.stringify(await call('/verify/request', { email: email() })));
+  document.getElementById('subBtn').onclick = async () => log('submit: ' + JSON.stringify(await call('/verify/submit', { email: email(), code: document.getElementById('code').value })));
+  document.getElementById('jsCookieBtn').onclick = () => log('document.cookie sees session? ' + (document.cookie.includes('collier_session') ? 'YES (FAIL)' : 'no (PASS — HttpOnly)'));
+  document.getElementById('tokenBtn').onclick = async () => { const r = await call('/token'); log('token: ' + r.status + ' user_id=' + (r.data && r.data.user_id) + ' hasToken=' + !!(r.data && r.data.token)); };
+  document.getElementById('logoutBtn').onclick = async () => log('logout: ' + JSON.stringify(await call('/logout')));
+  document.getElementById('postLogoutBtn').onclick = async () => log('post-logout token status (expect 401): ' + (await call('/token')).status);
+</script>
+</body>
+</html>

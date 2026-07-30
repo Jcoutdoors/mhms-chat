@@ -44,7 +44,13 @@ notes for the next session:
 - **Verified Identity Foundation — Phase 2 (verification-state Durable Object): infrastructure
  added under `auth/`, 2026-07-29. NOT deployed, no routes, no production change.** Strongly
  consistent verification-code state (`VerificationDO`) + Wrangler config + tests. See the
- "Phase 2" section below. Phase 3 not started.
+ "Phase 2" section below.
+- **Verified Identity Foundation — Phase 3 (server-side auth routes): implemented in
+ `auth/pages/`, 2026-07-30. NOT deployed; NO chat cutover.** Full flow — `/verify/request`,
+ `/verify/submit`, `/token`, `/logout` — signed 30-day `__Host-` session, server-side Stream-ID
+ derivation, branded Resend email (domain not yet verified → deploy blocker), IP + per-identity
+ rate limiting. The old token Worker is UNCHANGED and the raw `user_id` impersonation path
+ remains OPEN until Phase 4/5. See the "Phase 3" section below. Profile Photos not begun.
 - **READ BEFORE ANY QA:** on 2026-07-22 a QA mistake truncated two REAL production channels
  (`cats-mod-01`, `cats-mod-03`). Impact was accepted by the product owner, recovery is not
  expected. Destructive operations against production channels are now PROHIBITED, `truncate()`
@@ -1025,6 +1031,66 @@ consistent) or zone WAF rules (domain is not a Cloudflare DNS zone).
 **Tests:** `cd auth/verification-do && npm test` → 15/15 (issuance, expiry, attempts, success/
 single-use, cooldown, rolling-hour, concurrency, security invariants). No network/Stream/
 Cloudflare/email/real secrets. Identity + Featured Updates suites remain green.
+
+## Verified Identity Foundation — Phase 3 (server-side authentication routes)
+
+**Status:** implemented in `auth/pages/` (branch `vif-phase3-auth-routes`). **NOT deployed; NO
+chat cutover.** The live chat app still uses the old raw-`user_id` token Worker, which is
+**unchanged**; the **impersonation vulnerability remains OPEN** and is closed only in Phase 4
+(app cutover to authenticated `/token`) and Phase 5 (retire the old Worker). No Stream data
+accessed/modified. Profile Photos not begun.
+
+**Routes (all `POST`; exact-origin credentialed CORS; `Cache-Control: no-store`; generic error
+shape `{ok:false,error}`):** `/verify/request`, `/verify/submit`, `/token`, `/logout`. Meaning
+proved: "this person currently controls the email they entered" — NOT cohort/org/role/permission
+authorization (out of scope; open enrollment preserved). Full contracts, session design, secret
+boundary, email/DNS setup, and rate-limit decision are in `auth/README.md`.
+
+**Identity invariant:** the server derives the Stream ID via the **canonical Phase 1 module**
+(re-exported into the Functions bundle by esbuild), so a verified case/whitespace variant maps
+to the same existing Stream user ID and preserves all history. Proven end-to-end locally:
+`Person@Example.com` / `  PERSON@example.com ` → `cats-542d240129883c019e106e3b`.
+
+**Session:** signed HMAC-SHA256 (JWT-shaped), claims `sub`/`iat`/`exp`(=iat+30d)/`ver`; one
+`SESSION_SIGNING_SECRET`; cookie `__Host-collier_session; Secure; HttpOnly; SameSite=Lax;
+Path=/; Max-Age=2592000` (no `Domain`); no refresh/renewal/rotation-ring/server store/revocation.
+Emergency secret rotation invalidates all sessions (users re-verify).
+
+**Durable Object communication:** the Pages Function derives the opaque object name
+`HMAC-SHA256(normalizedEmail, IDENTITY_KEY_SECRET)` and sends only `{op, codeHmac, issuanceId}` —
+**never the raw email, never the plaintext code**. `CODE_HMAC_SECRET` lives only in the Pages
+Function; the DO holds no secret.
+
+**Delivery-safe issuance transaction (exclusive pending lock):** `/verify/request` runs
+reserve → send → confirm/cancel against `VerificationDO`. The **pending slot is an exclusive,
+short-lived lock**: at most one unexpired pending issuance per identity, and a new reservation is
+**rejected (`pending`), never superseded**; re-reserving the same id is idempotent and authorizes
+no new email. Only a **newly accepted** reservation sends, so **concurrent requests for one
+identity authorize at most one email** (verified in workerd). A code becomes submittable only
+after Resend **accepts** delivery (`confirmCode`, which commits cooldown/rolling-hour exactly
+once); an explicit failure OR ambiguous timeout **cancels** the pending issuance (`cancelCode`)
+consuming no cooldown/send, so the user can retry immediately. Issuance ids are opaque 128-bit
+random values, never disclosed. DO serialization also guarantees: stale cancel/confirm can't
+affect the accepted issuance; duplicate confirm/cancel are idempotent; cancel-after-confirm keeps
+the active code; confirm-after-cancel can't reactivate; a pending code is never submittable;
+abandoned pendings lazily expire (~2 min). The legacy single-shot `requestCode` op was **removed**
+(no production route used it) so there is no alternate issuance path bypassing the transaction. The
+DO stores only opaque HMAC + timestamps/counters + a pending `{issuanceId,codeHmac,reservedAt}` —
+no raw email, no plaintext code, no secret.
+
+**Email:** branded MHMS sender `verification@send.mentalhealthmadesimple.life` — **domain not yet
+verified in Resend (DEPLOY BLOCKER)**; tested with a mock transport + local capture; no real
+email sent.
+
+**Rate limiting:** binding-first (`AUTH_IP_LIMITER`, trusted `CF-Connecting-IP`, 5/60s) with the
+per-identity DO limits as the tighter control; binding **entitlement unconfirmed without deploy**;
+IP-keyed DO fallback defined.
+
+**Tests:** `auth/pages` 35/35 (CORS, verify request/submit, session, `/token`, logout, DO
+integration via the real Phase 2 logic, email adapter, rate-limit adapter) + full **workerd**
+local integration (request→DO→capture→submit→cookie→`/token`→logout→401, origin rejection).
+`auth/verification-do` 15/15, identity 9/9, Featured Updates 41/41. Pages Functions build compiles;
+DO dry-run valid. The Phase 2 `__do-binding-check.js` proof route was removed.
 
 ## QA SAFETY GUARDRAILS (required for all QA work)
 

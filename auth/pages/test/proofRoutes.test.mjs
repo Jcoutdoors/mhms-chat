@@ -9,7 +9,6 @@ import assert from 'node:assert/strict';
 import * as setFn from '../functions/proof/set.js';
 import * as checkFn from '../functions/proof/check.js';
 import * as logoutFn from '../functions/proof/logout.js';
-import * as doProbe from '../functions/__do-binding-check.js';
 
 const OK = 'https://chat.mentalhealthmadesimple.life';
 const BAD = 'https://evil.example';
@@ -77,11 +76,6 @@ test('POST /proof/logout: expires cookie (Max-Age=0), idempotent', async () => {
   assert.match(sc, /SameSite=Lax/);
   assert.equal(/Domain=/i.test(sc), false);
   assert.deepEqual(await res.json(), { ok: true, cleared: true });
-});
-
-test('local-only __do-binding-check is GATED: 404 in production (LOCAL_DO_PROOF unset)', async () => {
-  const res = await doProbe.onRequest({ env: {}, request: new Request('https://auth.local/__do-binding-check') });
-  assert.equal(res.status, 404); // excluded from production behavior; only active when LOCAL_DO_PROOF=1
 });
 
 test('OPTIONS preflight: approved -> 204 + CORS; unapproved -> 403 no ACAO', async () => {

@@ -1,9 +1,112 @@
 # Collier auth infrastructure (Verified Identity Foundation)
 
-Version-controlled Cloudflare authentication infrastructure. **Phase 2 status:
-Durable Object for verification-code state only. NOT deployed. No public auth
-routes. Production authentication is unchanged; the raw `user_id` impersonation
-path remains open until a later phase. Profile Photos has not begun.**
+Version-controlled Cloudflare authentication infrastructure. **Phase 3 status:
+full server-side auth flow implemented in `auth/pages/` (verify/request, verify/
+submit, token, logout) + session/cookie/email/rate-limit modules. NOT deployed.
+The live chat still uses the old token Worker; that Worker is unchanged and the
+raw `user_id` impersonation path remains OPEN until Phase 4/5 (app cutover + old
+Worker retirement). No Stream data changed. Profile Photos has not begun.**
+
+## Phase 3 — production auth routes (implemented, not deployed)
+
+Routes (all `POST`, exact-origin credentialed CORS, `Cache-Control: no-store`):
+- `POST /verify/request` (`functions/verify/request.js`) — validate+normalize email,
+  derive opaque DO name `HMAC-SHA256(normalizedEmail, IDENTITY_KEY_SECRET)`, generate
+  a CSPRNG 6-digit code + opaque issuance id, HMAC the code with `CODE_HMAC_SECRET`,
+  then run the **issuance transaction** (reserve → send → confirm/cancel; see below).
+  Generic response (open enrollment; no existence disclosure). IP rate limit applied.
+  Never persists/logs the plaintext code.
+
+### Issuance transaction (delivery-safe)
+**Invariant:** a code is never submittable unless its delivery was accepted, and an
+email never carries a code the service can't validate. The Durable Object exposes
+`reserveCode` / `confirmCode` / `cancelCode` keyed by an **opaque, 128-bit random
+issuance id** (`generateIssuanceId`), never disclosed to the client:
+1. **reserve** — an **EXCLUSIVE, short-lived lock**: at most one unexpired pending
+   issuance may exist per identity. If a *different* unexpired pending issuance already
+   exists, the new reservation is **rejected (`pending`), never superseded**; re-reserving
+   the *same* id is idempotent (`accepted:false`, no new delivery). Otherwise it checks
+   cooldown/hourly against *committed* sends and records a *pending* issuance (NOT
+   submittable). Commits nothing. Only a **newly accepted** reservation (`accepted:true`)
+   authorizes an email.
+2. **send** — Resend delivery is attempted **only** for a newly accepted reservation.
+3. **confirm** (on delivery success) — promotes the matching pending issuance to *active*
+   and commits the send/cooldown **exactly once**.
+4. **cancel** (on delivery failure) — removes only that pending issuance; **no**
+   cooldown/send is consumed, so the user may retry immediately. Cannot cancel a
+   newer or already-active issuance.
+
+**One email per identity transaction:** because the pending slot is an exclusive lock and
+only a newly accepted reservation sends, concurrent `/verify/request` calls for one identity
+authorize **at most one** email; the loser gets the generic `rate_limited` response.
+
+**State (minimal):** active (`codeHmac`/`expiresAt`/`attemptsRemaining`/`consumed`/
+`activeIssuanceId`) + `pending` (`{issuanceId, codeHmac, reservedAt}`) + committed
+`sends[]`/`lastSendAt`. No raw email, no plaintext code, no secret. Abandoned pending locks
+**lazily expire after 2 min**. A pending code is never submittable.
+
+**Ambiguous-timeout policy (conservative):** an explicit Resend rejection **and** an
+ambiguous timeout are both treated as failure → cancel locally. In the rare timeout
+case the user may receive an unusable code, but is never locked out — they can request
+another immediately (no cooldown was committed).
+
+**Concurrency (DO-serialized):** two concurrent requests → exactly one accepted reservation
+(one email, one send committed); the pending lock rejects the other rather than superseding
+it; a stale/older cancel or confirm cannot affect the accepted issuance; duplicate confirm/
+cancel are idempotent; cancel-after-confirm cannot remove the active code; confirm-after-cancel
+cannot reactivate. **Identity cooldown and rolling-hour accounting commit only on confirmation.**
+- `POST /verify/submit` (`functions/verify/submit.js`) — validate email + 6-digit
+  code, HMAC the code, submit HMAC to the DO (constant-time compare, 10-min TTL, 5
+  attempts, single-use). On success: derive the deterministic Stream ID, sign a
+  session, set the `__Host-` cookie. No cookie on failure. Token never in the body.
+- `POST /token` (`functions/token.js`) — read+verify the session cookie, mint a
+  Stream token for the session `sub` using `STREAM_SECRET`, return `{ ok, token,
+  user_id }`. The browser never supplies `user_id`.
+- `POST /logout` (`functions/logout.js`) — clear the cookie (`Max-Age=0`); idempotent;
+  no server-side revocation.
+
+Shared modules in `functions/lib/`: `config.js`, `http.js` (CORS/response), `crypto.js`
+(HMAC, CSPRNG code, constant-time), `session.js`, `cookie.js`, `identity.js` (re-exports
+the canonical Phase 1 module), `email.js` (Resend adapter + local capture), `stream.js`,
+`verificationClient.js` (DO client), `ratelimit.js`. Files in `functions/lib/` export no
+`onRequest` handler, so they are import-only modules, not routes.
+
+### Session
+Compact HMAC-SHA256 (JWT-shaped) token; claims `sub`/`iat`/`exp`(=iat+30d)/`ver`.
+One `SESSION_SIGNING_SECRET`; no refresh/renewal/sliding/rotation-ring/server store/
+revocation. **Emergency rotation of `SESSION_SIGNING_SECRET` invalidates all existing
+sessions — users must verify again.** Cookie `__Host-collier_session; Secure; HttpOnly;
+SameSite=Lax; Path=/; Max-Age=2592000` (no `Domain`).
+
+### Secret boundary
+`auth/pages/` receives `IDENTITY_KEY_SECRET`, `CODE_HMAC_SECRET`, `SESSION_SIGNING_SECRET`,
+`STREAM_SECRET`, `RESEND_API_KEY` (provision via `wrangler pages secret put <NAME>`).
+`auth/verification-do/` receives **no** production secret (it stores/compares HMACs only).
+Values are never committed; tests use deterministic test-only values.
+
+### Email (branded) — DEPLOY BLOCKER until verified
+Preferred sender `verification@send.mentalhealthmadesimple.life`. As of implementation the
+domain `send.mentalhealthmadesimple.life` is **NOT verified in Resend** (no DNS records).
+Before deploy, Jonathan must: (1) add `send.mentalhealthmadesimple.life` as a domain in the
+**auth Resend account**, (2) add the Resend-provided DNS records at Squarespace/NS1 (SPF TXT
+on `send`, DKIM `resend._domainkey`, MX `feedback-smtp…amazonses.com`, optional DMARC),
+(3) create an **auth-specific** `RESEND_API_KEY`. Do NOT silently fall back to
+`notifications.nexgenrva.com`. Email is tested here only with a mock transport / local capture.
+
+### IP rate limiting
+Adapter is binding-first (`AUTH_IP_LIMITER`, Workers Rate Limiting) keyed on the trusted
+`CF-Connecting-IP` (never `X-Forwarded-For`); limit 5/60s (coarse defense-in-depth; the DO
+per-identity cooldown/hourly limits are the tighter control). The binding config validated in
+Wrangler but **account entitlement is unconfirmed without a deploy**; if unavailable at deploy,
+wire the deterministic IP-keyed Durable Object fallback (do not use KV; no public endpoint).
+
+### Local integration proof
+`functions/__do-binding-check.js` (Phase 2) has been **removed**. Full-flow local proof uses
+`wrangler dev` (DO Worker) + `wrangler pages dev` with `--do` and test-only `--binding` values
+incl. `LOCAL_EMAIL_CAPTURE=1` (the email adapter returns the code locally instead of sending).
+`harness/browser-auth-harness.html` is a **test-only** browser harness kept OUTSIDE `public/`
+(not deployed) and NOT added to the chat app; serve it from the chat origin for a future
+approved browser matrix.
 
 ## Source-control boundary
 This lives inside the `mhms-chat` repository under `auth/` (a directory, not a
