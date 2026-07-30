@@ -107,7 +107,19 @@ It is LIVE with real students. Treat every change as a production change.
 - URL: `https://cats-notifications.jonathan-5ad.workers.dev`
 - Receives Stream `message.new` webhook events, sends email via Resend.
 - Env var: `RESEND_API_KEY` (Secret).
-- From address: `no-reply@notifications.nexgenrva.com` (verified subdomain in Resend).
+- From address (`FROM_ADDRESS` constant): migrating to `notifications@send.mentalhealthmadesimple.life`.
+  The repo/main code now carries the new sender; the **currently-deployed** Worker still sends from
+  the legacy `no-reply@notifications.nexgenrva.com` until the new domain is verified in Resend and the
+  Worker is redeployed (see the notification-domain migration below). Do NOT treat the new domain as
+  verified until Resend confirms it.
+- **Notification-domain migration (prepared, NOT deployed):** the free Resend plan allows only **one**
+  domain, so a single verified domain — `send.mentalhealthmadesimple.life` — will serve **both** the
+  notification sender (`notifications@send.mentalhealthmadesimple.life`) and the auth verification
+  sender (`verification@send.mentalhealthmadesimple.life`). Removing the old domain and verifying the
+  new one causes a **controlled notification-email outage** during cutover (see the cutover runbook in
+  the migration PR). API key: the existing `cats-notifications` key is scoped "All domains / Full
+  access", so it is expected to keep working after the domain swap; provision a replacement only if it
+  does not.
 - Routing: `@mark` / `@dr. mayfield` / `@dr. mark mayfield` → emails `dr.mark.mayfield@gmail.com`; `@support` / `@help` → emails `jonathan@nexgenrva.com`. (The `@dr. mark mayfield` variant was added in v48.) As of v61, mention patterns have a negative-lookbehind guard so email addresses in message text (like `jon@support.org` or Mark's own Gmail address) do NOT false-trigger, and a trailing word boundary so `@marketing` does not partially match `@mark`.
 - The email template includes a `CHANNEL_NAMES` friendly-name map (keep in sync with
  `APP_CONFIG.channelGroups` in the app) and a "Respond in the Chat" button linking to

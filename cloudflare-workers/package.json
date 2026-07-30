@@ -1,0 +1,5 @@
+{
+  "type": "module",
+  "private": true,
+  "description": "Cloudflare Workers (cats-notifications, cats-token). ESM. Declared type:module so Node's test runner can import these single-file Workers; not used by wrangler/Cloudflare deployment, which deploy each file directly."
+}

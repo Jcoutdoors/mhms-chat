@@ -9,7 +9,10 @@
 //   Webhook & Event Configuration. Point the webhook URL at this worker and
 //   subscribe ONLY to the "message.new" event.
 //
-// From address uses the verified subdomain notifications.nexgenrva.com in Resend.
+// From address uses the sending domain send.mentalhealthmadesimple.life in Resend
+// (see FROM_ADDRESS below). NOTE: during the notification-domain migration this
+// domain must be added and verified in Resend BEFORE this Worker is redeployed;
+// until then the previous domain remains live on the currently-deployed Worker.
 //
 // Routing:
 //   @mark / @dr. mayfield / @dr. mark mayfield  -> emails dr.mark.mayfield@gmail.com
@@ -21,6 +24,13 @@
 
 // The chat URL. The "Respond in the Chat" button opens General (kept simple and reliable).
 const CHAT_URL = 'https://chat.mentalhealthmadesimple.life';
+
+// Resend sending identity for outbound notification email. Centralized here (like
+// CHAT_URL) so the notification-domain migration is a single-line change. Display
+// name is unchanged; only the sending domain/local-part moved from the legacy
+// no-reply@notifications.nexgenrva.com to the shared MHMS sending domain. The new
+// domain must be verified in Resend before this Worker is redeployed.
+const FROM_ADDRESS = 'CATS Program <notifications@send.mentalhealthmadesimple.life>';
 
 // Map channel IDs to friendly display names so the email reads nicely even if the
 // webhook only includes the raw channel_id. Keep in sync with APP_CONFIG.channelGroups
@@ -95,7 +105,7 @@ export default {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          from: 'CATS Program <no-reply@notifications.nexgenrva.com>',
+          from: FROM_ADDRESS,
           to: [to],
           subject,
           html: `
