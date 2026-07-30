@@ -23,6 +23,9 @@ class_name = "IpRateLimitDO"
 script_name = "collier-verification-do"
 
 # Phase 3 will add these as Cloudflare secrets (names only; never committed):
-#   IDENTITY_KEY_SECRET, CODE_HMAC_SECRET, SESSION_SIGNING_SECRET,
-#   STREAM_SECRET, RESEND_API_KEY
-# (IDENTITY_KEY_SECRET also keys the opaque IP-rate-limit DO name.)
+#   IDENTITY_KEY_SECRET       -> opaque VerificationDO name (identity)
+#   CODE_HMAC_SECRET          -> code HMAC
+#   SESSION_SIGNING_SECRET    -> session signing
+#   STREAM_SECRET             -> Stream token minting
+#   RESEND_API_KEY            -> email delivery
+#   IP_RATE_LIMIT_KEY_SECRET  -> opaque IP-rate-limit DO name (dedicated; NOT IDENTITY_KEY_SECRET)

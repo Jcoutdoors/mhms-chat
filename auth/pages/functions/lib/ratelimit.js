@@ -1,40 +1,42 @@
-// IP rate-limit adapter (Phase 3) — dedicated fixed-window Durable Object.
+// IP rate-limit adapter (Phase 3) — trailing rolling-window Durable Object.
 //
-// FAIL CLOSED: if the IP_RATE_LIMIT_DO binding is unavailable, or the trusted
-// client IP is missing, or the limiter call errors, the verify routes REFUSE
-// service (never run unprotected). Uses ONLY the trusted `CF-Connecting-IP`
-// (never a user-supplied X-Forwarded-For). The Durable Object is addressed by an
-// OPAQUE HMAC-derived name so the raw IP is never used as a routing key or stored.
+// FAIL CLOSED: if IP_RATE_LIMIT_KEY_SECRET is missing, the IP_RATE_LIMIT_DO
+// binding is missing, the trusted client IP is missing, or the limiter call
+// errors, the verify routes REFUSE service. Uses ONLY the trusted
+// `CF-Connecting-IP` — never X-Forwarded-For, never a JSON/query IP. The Durable
+// Object is addressed by an OPAQUE `HMAC-SHA256(clientIP, IP_RATE_LIMIT_KEY_SECRET)`
+// name (dedicated secret, NOT IDENTITY_KEY_SECRET), so the raw IP is never a
+// routing key or stored. The caller sends only a server-defined policy name.
 
 import { AUTH_CONFIG } from './config.js';
 import { hmacSha256Hex } from './crypto.js';
 
-// Returns { allowed: boolean, reason: 'ok' | 'rate_limited' | 'unavailable' }.
-export async function checkIpRateLimit(env, request) {
-  const ns = env && env[AUTH_CONFIG.ipRateLimit.bindingName];
+// policyName: 'verify_request' | 'verify_submit' (server-chosen; never from the browser).
+// Returns { allowed, reason: 'ok'|'rate_limited'|'unavailable', retryAfterMs }.
+export async function checkIpRateLimit(env, request, policyName) {
+  if (!env || !env.IP_RATE_LIMIT_KEY_SECRET) {
+    return { allowed: false, reason: 'unavailable' }; // dedicated secret missing -> fail closed
+  }
+  const ns = env[AUTH_CONFIG.ipRateLimit.bindingName];
   if (!ns || typeof ns.idFromName !== 'function' || typeof ns.get !== 'function') {
-    return { allowed: false, reason: 'unavailable' }; // binding not bound -> fail closed
+    return { allowed: false, reason: 'unavailable' }; // binding missing -> fail closed
   }
   const ip = request.headers.get('CF-Connecting-IP');
   if (!ip) {
     return { allowed: false, reason: 'unavailable' }; // no trusted IP -> fail closed
   }
   try {
-    // Opaque IP-derived object name (keyed by IDENTITY_KEY_SECRET); raw IP never stored.
-    const name = await hmacSha256Hex(ip, env.IDENTITY_KEY_SECRET);
+    const name = await hmacSha256Hex(ip, env.IP_RATE_LIMIT_KEY_SECRET);
     const stub = ns.get(ns.idFromName(name));
     const res = await stub.fetch('https://ip.internal/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        op: 'hit',
-        limit: AUTH_CONFIG.ipRateLimit.limit,
-        periodMs: AUTH_CONFIG.ipRateLimit.periodSeconds * 1000,
-      }),
+      body: JSON.stringify({ op: 'hit', policy: policyName }),
     });
     if (!res || !res.ok) return { allowed: false, reason: 'unavailable' };
     const out = await res.json();
-    return out && out.allowed ? { allowed: true, reason: 'ok' } : { allowed: false, reason: 'rate_limited' };
+    if (out && out.allowed) return { allowed: true, reason: 'ok' };
+    return { allowed: false, reason: 'rate_limited', retryAfterMs: (out && out.retryAfterMs) || 0 };
   } catch {
     return { allowed: false, reason: 'unavailable' }; // limiter error -> fail closed
   }

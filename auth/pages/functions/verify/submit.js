@@ -16,9 +16,12 @@ export async function onRequestPost(context) {
   const { request, env } = context;
   if (!isApprovedOrigin(request)) return rejectOrigin();
 
-  const rl = await checkIpRateLimit(env, request); // fail closed on unavailable/over-limit
+  const rl = await checkIpRateLimit(env, request, 'verify_submit'); // fail closed
   if (!rl.allowed) {
-    return rl.reason === 'unavailable' ? errorApproved('service_unavailable', 503) : errorApproved('rate_limited', 429);
+    // No VerificationDO call, no code HMAC, no attempt decrement beyond this point.
+    return rl.reason === 'unavailable'
+      ? errorApproved('service_unavailable', 503)
+      : errorApproved('rate_limited', 429, { retryAfterMs: rl.retryAfterMs });
   }
 
   const body = await readJson(request);

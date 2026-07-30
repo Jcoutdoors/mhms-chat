@@ -21,16 +21,14 @@ export const AUTH_CONFIG = {
     maxAttempts: 5,
   },
 
-  // IP-level request limiting (fixed window) enforced by a dedicated Durable
-  // Object (IP_RATE_LIMIT_DO). FAIL CLOSED: if the binding is unavailable the
-  // verify routes refuse service rather than run unprotected.
-  // Reasoning for 5/60s: verification is a deliberate, low-frequency action;
-  // ~5 requests per 60s per IP absorbs honest retries/typos across a couple of
-  // people behind one NAT while stopping obvious scripted abuse. The per-identity
-  // limits (cooldown/hourly) in VerificationDO remain the tighter control.
+  // IP-level request limiting: trailing rolling windows enforced by a dedicated
+  // Durable Object (IP_RATE_LIMIT_DO), keyed by an opaque HMAC of the trusted IP
+  // using the dedicated IP_RATE_LIMIT_KEY_SECRET. FAIL CLOSED if unavailable.
+  // The thresholds are SERVER-DEFINED in the DO (see ipRateLimitLogic POLICIES:
+  // verify_request 5/60s + 20/60m; verify_submit 20/5m + 100/60m). The browser
+  // never supplies limits/policy values. These are coarse defense-in-depth; the
+  // per-identity limits in VerificationDO remain the tighter control.
   ipRateLimit: {
-    limit: 5,
-    periodSeconds: 60,
     bindingName: 'IP_RATE_LIMIT_DO',
   },
 
