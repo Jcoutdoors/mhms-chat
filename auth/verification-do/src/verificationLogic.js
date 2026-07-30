@@ -69,16 +69,28 @@ function canSend(state, now) {
 
 // ---- Phase 3 issuance transaction ----
 
-// Reserve a pending issuance. Checks cooldown/hourly against COMMITTED sends but
-// commits nothing yet. Does not make the code submittable. Replaces any prior
-// pending issuance (older pending's confirm/cancel will no-op on id mismatch).
+// Reserve a pending issuance. The pending slot is an EXCLUSIVE, short-lived lock:
+// at most one unexpired pending issuance may exist, and a new reservation NEVER
+// supersedes an existing unexpired pending one. Commits nothing (no cooldown/send)
+// and does not make the code submittable. Only a "newly accepted" reservation
+// (`accepted: true`) authorizes an email delivery.
 function reserveCode(state, now, codeHmac, issuanceId) {
   pruneSends(state, now);
-  prunePending(state, now);
+  prunePending(state, now); // expired pending is removed here, freeing the lock
+  // Idempotent re-reservation of the SAME id: return the existing reservation
+  // without authorizing another delivery.
+  if (state.pending && state.pending.issuanceId === issuanceId) {
+    return { state, result: { ok: true, accepted: false, reason: 'idempotent' } };
+  }
+  // Exclusive lock: a different unexpired pending issuance blocks a new one.
+  if (state.pending) {
+    return { state, result: { ok: false, reason: 'pending' } };
+  }
+  // Cooldown / rolling-hour gate against COMMITTED sends (resend-after-active gating).
   const gate = canSend(state, now);
   if (!gate.ok) return { state, result: gate };
   state.pending = { issuanceId, codeHmac, reservedAt: now };
-  return { state, result: { ok: true, issuanceId } };
+  return { state, result: { ok: true, accepted: true, issuanceId } };
 }
 
 // Promote the matching pending issuance to active and commit the send exactly
@@ -114,21 +126,6 @@ function cancelCode(state, now, issuanceId) {
   return { state, result: { ok: true } };
 }
 
-// Legacy single-shot issuance (Phase 2). Retained for canSend/back-compat tests.
-// NOT used by the Phase 3 route (which uses reserve/confirm/cancel).
-function requestCode(state, now, codeHmac) {
-  const gate = canSend(state, now);
-  if (!gate.ok) return { state, result: gate };
-  state.codeHmac = codeHmac;
-  state.expiresAt = now + CODE_TTL_MS;
-  state.attemptsRemaining = MAX_ATTEMPTS;
-  state.consumed = false;
-  state.activeIssuanceId = null;
-  state.lastSendAt = now;
-  state.sends.push(now);
-  return { state, result: { ok: true } };
-}
-
 // Validate a submitted code HMAC against the ACTIVE issuance only (a pending
 // issuance is never submittable). Enforces expiry, attempts, single-use.
 function submitCode(state, now, codeHmac) {
@@ -161,5 +158,5 @@ function submitCode(state, now, codeHmac) {
 export {
   CODE_TTL_MS, RESEND_COOLDOWN_MS, HOUR_MS, MAX_SENDS_PER_HOUR, MAX_ATTEMPTS, PENDING_TTL_MS,
   defaultState, pruneSends, prunePending, constantTimeEqual, canSend,
-  reserveCode, confirmCode, cancelCode, requestCode, submitCode,
+  reserveCode, confirmCode, cancelCode, submitCode,
 };

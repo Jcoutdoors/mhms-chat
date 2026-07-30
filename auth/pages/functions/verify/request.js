@@ -28,12 +28,18 @@ export async function onRequestPost(context) {
     const codeHmac = await hmacSha256Hex(code, env.CODE_HMAC_SECRET);
     const issuanceId = generateIssuanceId();
 
-    // 1) RESERVE: DO checks cooldown/hourly against committed sends, records a
-    //    pending issuance, but does NOT make the code submittable or commit a send.
+    // 1) RESERVE: exclusive pending lock. Rejects if another pending issuance
+    //    exists ('pending') or cooldown/hourly not satisfied — all mapped to the
+    //    generic rate_limited response (no pending-vs-cooldown disclosure). Commits
+    //    nothing and does not make the code submittable.
     const reserved = await reserveCode(env, objectName, codeHmac, issuanceId);
-    if (!reserved.ok) return errorApproved('rate_limited', 429); // cooldown / hourly_limit
+    if (!reserved.ok) return errorApproved('rate_limited', 429); // pending / cooldown / hourly_limit
+    if (!reserved.accepted) {
+      // Idempotent re-reservation of the same id: do NOT authorize another email.
+      return jsonApproved({ ok: true });
+    }
 
-    // 2) DELIVER: send the code only after the reservation is persisted.
+    // 2) DELIVER: send the code only for a NEWLY ACCEPTED reservation.
     const sent = await sendVerificationCode(env, norm, code);
 
     if (!sent.ok) {

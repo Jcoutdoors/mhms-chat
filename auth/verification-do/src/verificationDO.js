@@ -13,7 +13,7 @@
 // normalizedEmail, IDENTITY_KEY_SECRET))) chosen by the caller. This class never
 // receives the raw email and never receives a plaintext code — only code HMACs.
 
-import { defaultState, requestCode, submitCode, canSend, reserveCode, confirmCode, cancelCode } from './verificationLogic.js';
+import { defaultState, submitCode, canSend, reserveCode, confirmCode, cancelCode } from './verificationLogic.js';
 
 const STORAGE_KEY = 'state';
 
@@ -32,7 +32,8 @@ export class VerificationDO {
   }
 
   // Internal RPC-over-fetch contract used by the auth Pages Functions.
-  // Body: { op: 'requestCode'|'submitCode'|'canSend', codeHmac?: string }
+  // Body: { op: 'reserveCode'|'confirmCode'|'cancelCode'|'submitCode'|'canSend',
+  //         codeHmac?: string, issuanceId?: string }
   // `now` is server-authoritative (Date.now() here), never taken from input.
   async fetch(request) {
     let body;
@@ -65,12 +66,6 @@ export class VerificationDO {
     if (op === 'cancelCode') {
       if (!nonEmpty(body.issuanceId)) return json({ ok: false, reason: 'bad_request' }, 400);
       const { state, result } = cancelCode(s, now, body.issuanceId);
-      await this._save(state);
-      return json(result);
-    }
-    if (op === 'requestCode') {
-      if (!nonEmpty(body.codeHmac)) return json({ ok: false, reason: 'bad_request' }, 400);
-      const { state, result } = requestCode(s, now, body.codeHmac);
       await this._save(state);
       return json(result);
     }

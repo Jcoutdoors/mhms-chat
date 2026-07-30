@@ -39,7 +39,6 @@ function makeMockDO(received) {
           if (body.op === 'reserveCode') ({ state: s, result } = vlogic.reserveCode(s, now, body.codeHmac, body.issuanceId));
           else if (body.op === 'confirmCode') ({ state: s, result } = vlogic.confirmCode(s, now, body.issuanceId));
           else if (body.op === 'cancelCode') ({ state: s, result } = vlogic.cancelCode(s, now, body.issuanceId));
-          else if (body.op === 'requestCode') ({ state: s, result } = vlogic.requestCode(s, now, body.codeHmac));
           else if (body.op === 'submitCode') ({ state: s, result } = vlogic.submitCode(s, now, body.codeHmac));
           else if (body.op === 'canSend') result = vlogic.canSend(s, now);
           else result = { ok: false, reason: 'unknown_op' };
@@ -165,6 +164,23 @@ test('verify/request: delivery FAILURE cancels issuance — no active code, no c
   const code = (await retry.json()).__localCode;
   const ok = await submit.onRequestPost({ request: req('POST', { origin: OK, body: { email: 'f@a.com', code } }), env });
   assert.equal(ok.status, 200);
+});
+
+test('verify/request: two SIMULTANEOUS requests for one identity -> exactly one email, one accepted', async () => {
+  const env = makeEnv({ LOCAL_EMAIL_CAPTURE: '1' });
+  const [a, b] = await Promise.all([
+    request.onRequestPost({ request: req('POST', { origin: OK, body: { email: 'race@x.com' } }), env }),
+    request.onRequestPost({ request: req('POST', { origin: OK, body: { email: 'race@x.com' } }), env }),
+  ]);
+  const bodies = [await a.json(), await b.json()];
+  const accepted = bodies.filter((x) => x.ok && x.__localCode); // capture => one authorized email
+  const rejected = bodies.filter((x) => x.ok === false);
+  assert.equal(accepted.length, 1, 'exactly one email authorized');
+  assert.equal(rejected.length, 1);
+  assert.equal(rejected[0].error, 'rate_limited'); // pending lock, generic
+  // the single delivered code is confirmable + submittable
+  const sub = await submit.onRequestPost({ request: req('POST', { origin: OK, body: { email: 'race@x.com', code: accepted[0].__localCode } }), env });
+  assert.equal(sub.status, 200);
 });
 
 test('verify/request: delivery SUCCESS commits cooldown exactly once (second request within 60s -> rate_limited)', async () => {

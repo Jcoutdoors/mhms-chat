@@ -22,29 +22,39 @@ Routes (all `POST`, exact-origin credentialed CORS, `Cache-Control: no-store`):
 email never carries a code the service can't validate. The Durable Object exposes
 `reserveCode` / `confirmCode` / `cancelCode` keyed by an **opaque, 128-bit random
 issuance id** (`generateIssuanceId`), never disclosed to the client:
-1. **reserve** — checks cooldown/hourly against *committed* sends, records a *pending*
-   issuance (NOT submittable), commits nothing.
-2. **send** — Resend delivery is attempted only after the reservation persists.
-3. **confirm** (on delivery success) — promotes the pending issuance to *active* and
-   commits the send/cooldown **exactly once**. Only the matching pending id promotes.
+1. **reserve** — an **EXCLUSIVE, short-lived lock**: at most one unexpired pending
+   issuance may exist per identity. If a *different* unexpired pending issuance already
+   exists, the new reservation is **rejected (`pending`), never superseded**; re-reserving
+   the *same* id is idempotent (`accepted:false`, no new delivery). Otherwise it checks
+   cooldown/hourly against *committed* sends and records a *pending* issuance (NOT
+   submittable). Commits nothing. Only a **newly accepted** reservation (`accepted:true`)
+   authorizes an email.
+2. **send** — Resend delivery is attempted **only** for a newly accepted reservation.
+3. **confirm** (on delivery success) — promotes the matching pending issuance to *active*
+   and commits the send/cooldown **exactly once**.
 4. **cancel** (on delivery failure) — removes only that pending issuance; **no**
    cooldown/send is consumed, so the user may retry immediately. Cannot cancel a
    newer or already-active issuance.
 
+**One email per identity transaction:** because the pending slot is an exclusive lock and
+only a newly accepted reservation sends, concurrent `/verify/request` calls for one identity
+authorize **at most one** email; the loser gets the generic `rate_limited` response.
+
 **State (minimal):** active (`codeHmac`/`expiresAt`/`attemptsRemaining`/`consumed`/
 `activeIssuanceId`) + `pending` (`{issuanceId, codeHmac, reservedAt}`) + committed
-`sends[]`/`lastSendAt`. No raw email, no plaintext code, no secret. Pending issuances
-lazily expire after 2 min. A pending code is never submittable.
+`sends[]`/`lastSendAt`. No raw email, no plaintext code, no secret. Abandoned pending locks
+**lazily expire after 2 min**. A pending code is never submittable.
 
 **Ambiguous-timeout policy (conservative):** an explicit Resend rejection **and** an
 ambiguous timeout are both treated as failure → cancel locally. In the rare timeout
 case the user may receive an unusable code, but is never locked out — they can request
 another immediately (no cooldown was committed).
 
-**Concurrency (DO-serialized):** two concurrent requests → only the latest confirmed
-issuance becomes active (one send committed); a stale/older cancel or confirm cannot
-affect a newer issuance; duplicate confirm/cancel are idempotent; cancel-after-confirm
-cannot remove the active code; confirm-after-cancel cannot reactivate.
+**Concurrency (DO-serialized):** two concurrent requests → exactly one accepted reservation
+(one email, one send committed); the pending lock rejects the other rather than superseding
+it; a stale/older cancel or confirm cannot affect the accepted issuance; duplicate confirm/
+cancel are idempotent; cancel-after-confirm cannot remove the active code; confirm-after-cancel
+cannot reactivate. **Identity cooldown and rolling-hour accounting commit only on confirmation.**
 - `POST /verify/submit` (`functions/verify/submit.js`) — validate email + 6-digit
   code, HMAC the code, submit HMAC to the DO (constant-time compare, 10-min TTL, 5
   attempts, single-use). On success: derive the deterministic Stream ID, sign a

@@ -1061,16 +1061,21 @@ Emergency secret rotation invalidates all sessions (users re-verify).
 **never the raw email, never the plaintext code**. `CODE_HMAC_SECRET` lives only in the Pages
 Function; the DO holds no secret.
 
-**Delivery-safe issuance transaction:** `/verify/request` runs reserve → send → confirm/cancel
-against `VerificationDO`. A code becomes submittable only after Resend **accepts** delivery
-(`confirmCode`, which commits cooldown/hourly exactly once); an explicit failure OR an ambiguous
-timeout **cancels** the pending issuance (`cancelCode`) consuming no cooldown/send, so the user
-can retry immediately. Issuance ids are opaque 128-bit random values, never disclosed. DO
-serialization guarantees: two concurrent requests → only the latest confirmed issuance is active
-(one send committed); a stale cancel/confirm can't affect a newer issuance; duplicate confirm/
-cancel are idempotent; cancel-after-confirm keeps the active code; confirm-after-cancel can't
-reactivate; a pending code is never submittable; abandoned pendings expire (~2 min, lazy). The DO
-stores only opaque HMAC + timestamps/counters + a pending `{issuanceId,codeHmac,reservedAt}` —
+**Delivery-safe issuance transaction (exclusive pending lock):** `/verify/request` runs
+reserve → send → confirm/cancel against `VerificationDO`. The **pending slot is an exclusive,
+short-lived lock**: at most one unexpired pending issuance per identity, and a new reservation is
+**rejected (`pending`), never superseded**; re-reserving the same id is idempotent and authorizes
+no new email. Only a **newly accepted** reservation sends, so **concurrent requests for one
+identity authorize at most one email** (verified in workerd). A code becomes submittable only
+after Resend **accepts** delivery (`confirmCode`, which commits cooldown/rolling-hour exactly
+once); an explicit failure OR ambiguous timeout **cancels** the pending issuance (`cancelCode`)
+consuming no cooldown/send, so the user can retry immediately. Issuance ids are opaque 128-bit
+random values, never disclosed. DO serialization also guarantees: stale cancel/confirm can't
+affect the accepted issuance; duplicate confirm/cancel are idempotent; cancel-after-confirm keeps
+the active code; confirm-after-cancel can't reactivate; a pending code is never submittable;
+abandoned pendings lazily expire (~2 min). The legacy single-shot `requestCode` op was **removed**
+(no production route used it) so there is no alternate issuance path bypassing the transaction. The
+DO stores only opaque HMAC + timestamps/counters + a pending `{issuanceId,codeHmac,reservedAt}` —
 no raw email, no plaintext code, no secret.
 
 **Email:** branded MHMS sender `verification@send.mentalhealthmadesimple.life` — **domain not yet
