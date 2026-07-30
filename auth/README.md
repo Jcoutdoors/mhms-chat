@@ -13,11 +13,53 @@ project boundary stays explicit: `auth/` has its own Wrangler config, package,
 and test command, and deploys via **Wrangler to Cloudflare — never** via the chat
 app's GitHub Pages pipeline.
 
-> Note: the Phase 0 proof Pages project (`collier-auth-proof`, live at
-> `https://auth.mentalhealthmadesimple.life`) currently has its source in an
-> un-versioned local folder (`~/dev/collier-auth-proof/`). Phase 2 does not touch
-> that live deployment or its proof routes. Reconciling the Pages project source
-> into version control is a later-phase task.
+> The Phase 0 proof Pages project source (previously an un-versioned local folder
+> `~/dev/collier-auth-proof/`) is now version-controlled under `auth/pages/`
+> (migrated byte-identical; verified to match the live deployed route behavior).
+> Phase 2 does not deploy or alter the live deployment or its proof routes.
+
+## Directory boundary
+
+**`auth/pages/`** — the Cloudflare **Pages** project for `auth.mentalhealthmadesimple.life`.
+- `public/` — placeholder static asset (Pages build output dir).
+- `functions/proof/{set,check,logout}.js` — the preserved Phase 0 proof routes.
+- `functions/__do-binding-check.js` — LOCAL-ONLY, env-gated (`LOCAL_DO_PROOF=1`)
+  proof of the Pages→Durable Object binding; returns 404 in production.
+- `wrangler.toml` — Pages config (`pages_build_output_dir`, compatibility date) +
+  the external Durable Object binding (`VERIFICATION_DO` → class `VerificationDO`,
+  `script_name = "collier-verification-do"`).
+- `test/proofRoutes.test.mjs` — source-preservation + gate tests (`npm test`).
+- Future Phase 3 routes (`/verify/request`, `/verify/submit`, `/token`, `/logout`)
+  will live here. **Not implemented.**
+
+**`auth/verification-do/`** — the Worker exporting `VerificationDO`. No public route
+(default fetch 404). The Durable Object implementation + tests.
+
+### Local validation / proof commands (no deploy)
+```
+# DO Worker tests + config dry-run
+cd auth/verification-do && npm test && npm run validate
+
+# Pages proof-route source-preservation + gate tests + Functions build
+cd auth/pages && npm test && npm run build
+
+# Runtime Pages→DO integration proof (two local workerd processes):
+#   term 1:
+cd auth/verification-do && npx wrangler dev --port 8799 --local
+#   term 2:
+cd auth/pages && npx wrangler pages dev public --port 8788 \
+  --do VERIFICATION_DO=VerificationDO@collier-verification-do --binding LOCAL_DO_PROOF=1
+#   then drive the gated probe (state persists; concurrent ops serialize):
+curl "http://127.0.0.1:8788/__do-binding-check?id=x&op=requestCode&codeHmac=<hex>"
+```
+
+### Future deployment (requires explicit approval; NOT done in Phase 2)
+```
+cd auth/verification-do && npx wrangler deploy          # deploy the DO Worker first
+cd auth/pages && npx wrangler pages deploy public       # then the Pages project (with the DO binding)
+```
+Deploy order matters: the DO Worker (`collier-verification-do`) must exist before
+the Pages project's `script_name` binding can resolve.
 
 ## Topology (intended)
 ```

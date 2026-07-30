@@ -962,9 +962,28 @@ remains OPEN. Profile Photos has not begun. **Phase 3 is not started.**
 
 **Source-control boundary.** Auth infra lives IN this repo under `auth/` (a directory, not a
 separate repo), reviewed via the normal PR flow, but deployed via **Wrangler** — never via the
-chat app's GitHub Pages pipeline. The Phase 0 proof Pages project (`collier-auth-proof`, live
-at `auth.mentalhealthmadesimple.life`) is untouched; its source remains an un-versioned local
-folder to be reconciled into version control later. See `auth/README.md` for the full boundary.
+chat app's GitHub Pages pipeline. Two sub-projects: **`auth/pages/`** (the Cloudflare Pages
+project for `auth.mentalhealthmadesimple.life` — migrated byte-identical from the previously
+un-versioned `~/dev/collier-auth-proof/`, verified to match live deployed behavior; holds the
+preserved Phase 0 proof routes and future Phase 3 routes) and **`auth/verification-do/`** (the
+Worker exporting `VerificationDO`; no public route). The live `collier-auth-proof` deployment
+and its proof routes are untouched. See `auth/README.md` for the full boundary and commands.
+
+**Pages→Durable Object binding is locally proven** (not just TOML-validated). Using real
+Wrangler/workerd (`wrangler dev` on the DO Worker + `wrangler pages dev` with
+`--do VERIFICATION_DO=VerificationDO@collier-verification-do`), a gated local Pages Function
+reached `context.env.VERIFICATION_DO`, obtained the stub, and drove the RPC: state **persisted**
+across separate calls, concurrent duplicate submissions yielded **exactly one** success, and
+concurrent resends yielded **exactly one** allowed — confirming real-runtime serialization
+matches the business-logic assumptions. **Phase 0 proof behavior is preserved** (migrated-source
+tests: set/check/logout, exact-origin credentialed CORS, `__Host-` cookie attributes, no
+`Domain`, no cookie-value disclosure).
+
+**GitHub Pages exposure:** all repo source is already publicly served under
+`https://chat.mentalhealthmadesimple.life/` (e.g. `src/`, `qa-tools/`, docs). A `_config.yml`
+`exclude` now removes `auth/` (and other non-app source/docs) from the published site — clean
+deployment hygiene, no secrets involved; app runtime assets (bundle, chunks, index, images,
+CNAME) are unaffected. Effect to be confirmed on the live Pages build post-merge (reversible).
 
 **Topology:** Browser → `auth.mentalhealthmadesimple.life` Pages Functions (Phase 3) →
 `VERIFICATION_DO` binding → the Durable Object (this phase). The DO Worker exists only to export
