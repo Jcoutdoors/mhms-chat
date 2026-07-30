@@ -42,15 +42,19 @@ notes for the next session:
  tests added, 2026-07-29.** Canonical `src/identity.js` + `src/identityVectors.js` + tests;
  NO production runtime change. See the "Phase 1" section below.
 - **Verified Identity Foundation — Phase 2 (verification-state Durable Object): infrastructure
- added under `auth/`, 2026-07-29. NOT deployed, no routes, no production change.** Strongly
- consistent verification-code state (`VerificationDO`) + Wrangler config + tests. See the
- "Phase 2" section below.
-- **Verified Identity Foundation — Phase 3 (server-side auth routes): implemented in
- `auth/pages/`, 2026-07-30. NOT deployed; NO chat cutover.** Full flow — `/verify/request`,
- `/verify/submit`, `/token`, `/logout` — signed 30-day `__Host-` session, server-side Stream-ID
- derivation, branded Resend email (domain not yet verified → deploy blocker), IP + per-identity
- rate limiting. The old token Worker is UNCHANGED and the raw `user_id` impersonation path
- remains OPEN until Phase 4/5. See the "Phase 3" section below. Profile Photos not begun.
+ added under `auth/`, 2026-07-29 — implemented but not deployed during Phase 2 itself, with no
+ chat integration in that phase. The Durable Object Worker was **subsequently deployed during the
+ Phase 3 production rollout** (now live).** Strongly consistent verification-code state
+ (`VerificationDO`) + Wrangler config + tests. See the "Phase 2" section below.
+- **Verified Identity Foundation — Phase 3 (server-side auth routes): implemented in `auth/pages/`
+ and **deployed independently to production**, 2026-07-30; **NO chat cutover.**** Full flow —
+ `/verify/request`, `/verify/submit`, `/token`, `/logout` — signed 30-day `__Host-` session,
+ server-side Stream-ID derivation, branded Resend email on the **verified, live** sending domain
+ `send.mentalhealthmadesimple.life`, IP + per-identity rate limiting. Deployed at
+ `auth.mentalhealthmadesimple.life`; verification email delivery operational; API validation and
+ the production browser matrix are complete. The old token Worker is UNCHANGED and the raw
+ `user_id` impersonation path remains OPEN until Phase 4/5. See the "Phase 3" section below.
+ Profile Photos not begun.
 - **READ BEFORE ANY QA:** on 2026-07-22 a QA mistake truncated two REAL production channels
  (`cats-mod-01`, `cats-mod-03`). Impact was accepted by the product owner, recovery is not
  expected. Destructive operations against production channels are now PROHIBITED, `truncate()`
@@ -107,19 +111,17 @@ It is LIVE with real students. Treat every change as a production change.
 - URL: `https://cats-notifications.jonathan-5ad.workers.dev`
 - Receives Stream `message.new` webhook events, sends email via Resend.
 - Env var: `RESEND_API_KEY` (Secret).
-- From address (`FROM_ADDRESS` constant): migrating to `notifications@send.mentalhealthmadesimple.life`.
-  The repo/main code now carries the new sender; the **currently-deployed** Worker still sends from
-  the legacy `no-reply@notifications.nexgenrva.com` until the new domain is verified in Resend and the
-  Worker is redeployed (see the notification-domain migration below). Do NOT treat the new domain as
-  verified until Resend confirms it.
-- **Notification-domain migration (prepared, NOT deployed):** the free Resend plan allows only **one**
-  domain, so a single verified domain — `send.mentalhealthmadesimple.life` — will serve **both** the
+- From address (`FROM_ADDRESS` constant): `notifications@send.mentalhealthmadesimple.life` — **live
+  in production.** The deployed Worker now sends from the verified sending domain; the legacy
+  `no-reply@notifications.nexgenrva.com` sender is retired.
+- **Notification-domain migration (COMPLETE, deployed):** PR #13 merged (merge `d057f16`) and the
+  notification Worker was redeployed (version `1b474bab`) on the **verified, live** sending domain
+  `send.mentalhealthmadesimple.life`; live delivery of `@mark`/`@support` was validated. The free
+  Resend plan allows only **one** domain, so this single verified domain serves **both** the
   notification sender (`notifications@send.mentalhealthmadesimple.life`) and the auth verification
-  sender (`verification@send.mentalhealthmadesimple.life`). Removing the old domain and verifying the
-  new one causes a **controlled notification-email outage** during cutover (see the cutover runbook in
-  the migration PR). API key: the existing `cats-notifications` key is scoped "All domains / Full
-  access", so it is expected to keep working after the domain swap; provision a replacement only if it
-  does not.
+  sender (`verification@send.mentalhealthmadesimple.life`). The `cats-notifications` key (scoped
+  "All domains / Full access") continued to work across the swap; no key change was needed. (Detail:
+  `REVIEW_HANDOFF.md`.)
 - Routing: `@mark` / `@dr. mayfield` / `@dr. mark mayfield` → emails `dr.mark.mayfield@gmail.com`; `@support` / `@help` → emails `jonathan@nexgenrva.com`. (The `@dr. mark mayfield` variant was added in v48.) As of v61, mention patterns have a negative-lookbehind guard so email addresses in message text (like `jon@support.org` or Mark's own Gmail address) do NOT false-trigger, and a trailing word boundary so `@marketing` does not partially match `@mark`.
 - The email template includes a `CHANNEL_NAMES` friendly-name map (keep in sync with
  `APP_CONFIG.channelGroups` in the app) and a "Respond in the Chat" button linking to
@@ -971,12 +973,19 @@ later VIF phase (new authenticated `/token` + retirement of raw `user_id` mintin
 
 ## Verified Identity Foundation — Phase 2 (verification-state Durable Object infrastructure)
 
-**Status:** version-controlled auth infrastructure added (branch
-`vif-phase2-auth-infrastructure`). **NOT deployed.** No public auth routes, no live
-application integration, no session/cookie, no Resend, no DNS/Stream/Worker change. Only the
-strongly-consistent verification-code **state** engine is built and tested. **Routes are not
-implemented.** Production authentication is unchanged; the raw `user_id` impersonation vector
-remains OPEN. Profile Photos has not begun. **Phase 3 is not started.**
+**Status (historical — Phase 2 as completed):** version-controlled auth infrastructure added
+(branch `vif-phase2-auth-infrastructure`). **At Phase 2 completion this layer was implemented but
+not yet deployed** — no public auth routes, no live application integration, no session/cookie, no
+Resend, no DNS/Stream/Worker change; only the strongly-consistent verification-code **state**
+engine was built and tested, and the public routes did not yet exist (they were added in Phase 3).
+
+**Current status (updated after Phase 3 rollout):** the Durable Object layer (`VerificationDO`,
+later joined by `IpRateLimitDO`) was **subsequently deployed during the approved Phase 3 production
+rollout** and is now live in the `collier-verification-do` Worker. **Phase 3 is now complete as an
+independent auth deployment** (see the Phase 3 section below). **Phase 4 has not started:** the chat
+app has not cut over, the legacy raw-`user_id` token Worker remains live and unchanged, and the
+impersonation vector remains OPEN until Phase 4 (cutover) and Phase 5 (retire the old Worker).
+Profile Photos has not begun.
 
 **Source-control boundary.** Auth infra lives IN this repo under `auth/` (a directory, not a
 separate repo), reviewed via the normal PR flow, but deployed via **Wrangler** — never via the

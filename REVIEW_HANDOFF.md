@@ -6,13 +6,26 @@ Independent production deployment of the Verified Identity auth service, validat
 **Merged to `main` (merge-commit method):**
 - PR #12 — rolling-window IP rate limiter (`IpRateLimitDO`) — merge `bad44ad`
 - PR #13 — notification-domain migration (sender → `notifications@send.mentalhealthmadesimple.life`) — merge `d057f16`
-- PR #14 / #15 / #16 — temporary browser-matrix harness: add → rename (Jekyll fix) → **removed**. Net-zero repo change; harness URL now `404`; no runtime/bundle/Worker files touched.
+- PR #14 / #15 / #16 — temporary browser-matrix harness `auth-test-f9ecbdf967ac937151036422.html` (served from the chat origin): add → rename to drop the leading `__` so GitHub Pages/Jekyll would publish it (Jekyll excludes `_`-prefixed files) → **removed**. Net-zero repo change; both the `auth-test-…` and the original `__auth-test-…` URLs now return `404`; no permanent public harness remains; no runtime/bundle/Worker files touched.
+- PR #17 — documentation reconciliation (this handoff + PROJECT_KNOWLEDGE / SETUP / auth-README / TECHNICAL_DEBT current-state updates); Markdown-only.
 
 **Deployed (production):** DO Worker `collier-verification-do` (`VerificationDO` + `IpRateLimitDO`, migrations v1/v2, inert `404` default fetch, no secrets); Pages `collier-auth-proof` at `auth.mentalhealthmadesimple.life`. Six secrets provisioned to the Pages project only; `STREAM_SECRET` reuses the existing (un-rotated) Stream secret; `RESEND_API_KEY` = dedicated `cats-auth-verification` key. Notification Worker `cats-notifications` redeployed on the verified shared domain (version `1b474bab`).
 
 **Validation:** full production API validation (CORS/headers, verification email from `verification@send.mentalhealthmadesimple.life`, code submit incl. leading-zero, `__Host` cookie attributes, `/token` deterministic `user_id`, logout → `401`, reuse/cooldown/concurrency/rate-limit + `Retry-After`, origin enforcement) **all pass**. **Browser matrix all PASS** — Chrome normal/incognito, Safari normal/private, iPhone Safari, and the **real Squarespace iframe** (proves `SameSite=Lax` same-site cookie works in the embedded context; Safari ITP did not break it).
 
-**Status:** independent auth deployment complete · API validation complete · browser matrix complete · temporary harness removed · **Phase 4 not started** · Phase 4 cookie/session prerequisite **satisfied**. Known characteristic: stateless sessions are not server-side revocable on logout (see `TECHNICAL_DEBT.md`). Details in `PROJECT_KNOWLEDGE.md` → "Phase 3 — independent production deployment + browser matrix".
+**Status (clearly separated):**
+- **Infrastructure deployed:** DO Worker + auth Pages live in production (above).
+- **Tests/validation completed:** API validation complete; production browser matrix complete (6/6).
+- **Temporary harness removed:** URLs `404`; no permanent public harness.
+- **Documentation reconciled:** PR #17 updates current-state language across the authority docs.
+- **Chat cutover NOT started:** the live chat still uses the legacy raw-`user_id` token Worker.
+- **Phase 4 still gated / not started;** Phase 4 cookie/session prerequisite **satisfied**.
+
+**Phase 3 does NOT resolve the legacy chat impersonation vulnerability.** Because the chat has not
+cut over and the old token Worker remains live, the raw-`user_id` impersonation path stays **open**
+until Phase 4 (cutover) and Phase 5 (retire the old Worker). Known design characteristic: stateless
+sessions are not server-side revocable on logout (see `TECHNICAL_DEBT.md`). Full detail in
+`PROJECT_KNOWLEDGE.md` → "Phase 3 — independent production deployment + browser matrix".
 
 ---
 
