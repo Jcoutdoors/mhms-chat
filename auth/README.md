@@ -12,10 +12,39 @@ Worker retirement). No Stream data changed. Profile Photos has not begun.**
 Routes (all `POST`, exact-origin credentialed CORS, `Cache-Control: no-store`):
 - `POST /verify/request` (`functions/verify/request.js`) — validate+normalize email,
   derive opaque DO name `HMAC-SHA256(normalizedEmail, IDENTITY_KEY_SECRET)`, generate
-  a CSPRNG 6-digit code, HMAC it with `CODE_HMAC_SECRET`, have `VerificationDO`
-  authorize issuance (one active code / 60s cooldown / 3-per-hour), THEN send via
-  Resend. Generic response (open enrollment; no existence disclosure). IP rate limit
-  applied. Never persists/logs the plaintext code.
+  a CSPRNG 6-digit code + opaque issuance id, HMAC the code with `CODE_HMAC_SECRET`,
+  then run the **issuance transaction** (reserve → send → confirm/cancel; see below).
+  Generic response (open enrollment; no existence disclosure). IP rate limit applied.
+  Never persists/logs the plaintext code.
+
+### Issuance transaction (delivery-safe)
+**Invariant:** a code is never submittable unless its delivery was accepted, and an
+email never carries a code the service can't validate. The Durable Object exposes
+`reserveCode` / `confirmCode` / `cancelCode` keyed by an **opaque, 128-bit random
+issuance id** (`generateIssuanceId`), never disclosed to the client:
+1. **reserve** — checks cooldown/hourly against *committed* sends, records a *pending*
+   issuance (NOT submittable), commits nothing.
+2. **send** — Resend delivery is attempted only after the reservation persists.
+3. **confirm** (on delivery success) — promotes the pending issuance to *active* and
+   commits the send/cooldown **exactly once**. Only the matching pending id promotes.
+4. **cancel** (on delivery failure) — removes only that pending issuance; **no**
+   cooldown/send is consumed, so the user may retry immediately. Cannot cancel a
+   newer or already-active issuance.
+
+**State (minimal):** active (`codeHmac`/`expiresAt`/`attemptsRemaining`/`consumed`/
+`activeIssuanceId`) + `pending` (`{issuanceId, codeHmac, reservedAt}`) + committed
+`sends[]`/`lastSendAt`. No raw email, no plaintext code, no secret. Pending issuances
+lazily expire after 2 min. A pending code is never submittable.
+
+**Ambiguous-timeout policy (conservative):** an explicit Resend rejection **and** an
+ambiguous timeout are both treated as failure → cancel locally. In the rare timeout
+case the user may receive an unusable code, but is never locked out — they can request
+another immediately (no cooldown was committed).
+
+**Concurrency (DO-serialized):** two concurrent requests → only the latest confirmed
+issuance becomes active (one send committed); a stale/older cancel or confirm cannot
+affect a newer issuance; duplicate confirm/cancel are idempotent; cancel-after-confirm
+cannot remove the active code; confirm-after-cancel cannot reactivate.
 - `POST /verify/submit` (`functions/verify/submit.js`) — validate email + 6-digit
   code, HMAC the code, submit HMAC to the DO (constant-time compare, 10-min TTL, 5
   attempts, single-use). On success: derive the deterministic Stream ID, sign a

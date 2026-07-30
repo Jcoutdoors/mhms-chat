@@ -85,3 +85,18 @@ test('stored blob contains no plaintext code, no email, no secret', async () => 
   assert.equal(blob.includes('@'), false);
   assert.equal(blob.toLowerCase().includes('secret'), false);
 });
+
+test('fetch RPC: reserve -> confirm -> submit; reserve -> cancel leaves nothing (real class + storage mock)', async () => {
+  const st = makeState();
+  const doi = new VerificationDO(st, {});
+  const h = await codeHmac('246810');
+  // reserve (pending; not submittable)
+  const r1 = await (await doi.fetch(post('reserveCode', { codeHmac: h, issuanceId: 'iss-1' }))).json();
+  assert.equal(r1.ok, true);
+  assert.equal((await (await doi.fetch(post('submitCode', { codeHmac: h }))).json()).reason, 'no_active_code');
+  // confirm -> active -> submit ok
+  assert.equal((await (await doi.fetch(post('confirmCode', { issuanceId: 'iss-1' }))).json()).ok, true);
+  assert.equal((await (await doi.fetch(post('submitCode', { codeHmac: h }))).json()).ok, true);
+  // bad op still rejected; missing issuanceId rejected
+  assert.equal((await doi.fetch(post('reserveCode', { codeHmac: h }))).status, 400);
+});

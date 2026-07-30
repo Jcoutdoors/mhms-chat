@@ -1,8 +1,8 @@
 // POST /verify/request — issue a verification code (Phase 3).
 import { isApprovedOrigin, rejectOrigin, preflight, readJson, jsonApproved, errorApproved } from '../lib/http.js';
 import { normalizeEmail } from '../lib/identity.js';
-import { generateSixDigitCode, hmacSha256Hex } from '../lib/crypto.js';
-import { deriveObjectName, requestCode } from '../lib/verificationClient.js';
+import { generateSixDigitCode, generateIssuanceId, hmacSha256Hex } from '../lib/crypto.js';
+import { deriveObjectName, reserveCode, confirmCode, cancelCode } from '../lib/verificationClient.js';
 import { sendVerificationCode } from '../lib/email.js';
 import { checkIpRateLimit } from '../lib/ratelimit.js';
 
@@ -26,12 +26,27 @@ export async function onRequestPost(context) {
     const objectName = await deriveObjectName(env, norm);
     const code = generateSixDigitCode();
     const codeHmac = await hmacSha256Hex(code, env.CODE_HMAC_SECRET);
-    // DO authorizes issuance (one active code, cooldown, hourly limit) BEFORE we email.
-    const issue = await requestCode(env, objectName, codeHmac);
-    if (!issue.ok) return errorApproved('rate_limited', 429); // cooldown / hourly_limit
+    const issuanceId = generateIssuanceId();
 
+    // 1) RESERVE: DO checks cooldown/hourly against committed sends, records a
+    //    pending issuance, but does NOT make the code submittable or commit a send.
+    const reserved = await reserveCode(env, objectName, codeHmac, issuanceId);
+    if (!reserved.ok) return errorApproved('rate_limited', 429); // cooldown / hourly_limit
+
+    // 2) DELIVER: send the code only after the reservation is persisted.
     const sent = await sendVerificationCode(env, norm, code);
-    if (!sent.ok) return errorApproved('service_unavailable', 503);
+
+    if (!sent.ok) {
+      // 3a) FAILURE (explicit rejection OR ambiguous timeout — both treated as
+      //     failure, conservatively): cancel ONLY this issuance. No send/cooldown
+      //     is committed, so the user may immediately request another code.
+      try { await cancelCode(env, objectName, issuanceId); } catch { /* best-effort; nothing committed */ }
+      return errorApproved('service_unavailable', 503);
+    }
+
+    // 3b) SUCCESS: confirm — promotes this issuance to active and commits the
+    //     send/cooldown exactly once. Only the matching pending issuance promotes.
+    await confirmCode(env, objectName, issuanceId);
 
     // Generic response (open enrollment: no existence disclosure).
     const out = { ok: true };

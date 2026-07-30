@@ -13,7 +13,7 @@
 // normalizedEmail, IDENTITY_KEY_SECRET))) chosen by the caller. This class never
 // receives the raw email and never receives a plaintext code — only code HMACs.
 
-import { defaultState, requestCode, submitCode, canSend } from './verificationLogic.js';
+import { defaultState, requestCode, submitCode, canSend, reserveCode, confirmCode, cancelCode } from './verificationLogic.js';
 
 const STORAGE_KEY = 'state';
 
@@ -50,14 +50,32 @@ export class VerificationDO {
       await this._save(s); // persist pruned sends
       return json(result);
     }
+    if (op === 'reserveCode') {
+      if (!nonEmpty(body.codeHmac) || !nonEmpty(body.issuanceId)) return json({ ok: false, reason: 'bad_request' }, 400);
+      const { state, result } = reserveCode(s, now, body.codeHmac, body.issuanceId);
+      await this._save(state);
+      return json(result);
+    }
+    if (op === 'confirmCode') {
+      if (!nonEmpty(body.issuanceId)) return json({ ok: false, reason: 'bad_request' }, 400);
+      const { state, result } = confirmCode(s, now, body.issuanceId);
+      await this._save(state);
+      return json(result);
+    }
+    if (op === 'cancelCode') {
+      if (!nonEmpty(body.issuanceId)) return json({ ok: false, reason: 'bad_request' }, 400);
+      const { state, result } = cancelCode(s, now, body.issuanceId);
+      await this._save(state);
+      return json(result);
+    }
     if (op === 'requestCode') {
-      if (typeof body.codeHmac !== 'string' || !body.codeHmac) return json({ ok: false, reason: 'bad_request' }, 400);
+      if (!nonEmpty(body.codeHmac)) return json({ ok: false, reason: 'bad_request' }, 400);
       const { state, result } = requestCode(s, now, body.codeHmac);
       await this._save(state);
       return json(result);
     }
     if (op === 'submitCode') {
-      if (typeof body.codeHmac !== 'string' || !body.codeHmac) return json({ ok: false, reason: 'bad_request' }, 400);
+      if (!nonEmpty(body.codeHmac)) return json({ ok: false, reason: 'bad_request' }, 400);
       const { state, result } = submitCode(s, now, body.codeHmac);
       await this._save(state);
       return json(result);
@@ -65,6 +83,8 @@ export class VerificationDO {
     return json({ ok: false, reason: 'unknown_op' }, 400);
   }
 }
+
+function nonEmpty(v) { return typeof v === 'string' && v.length > 0; }
 
 function json(obj, status = 200) {
   return new Response(JSON.stringify(obj), {

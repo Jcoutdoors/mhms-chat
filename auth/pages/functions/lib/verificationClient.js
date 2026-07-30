@@ -14,14 +14,14 @@ function stubFor(env, objectName) {
   return env.VERIFICATION_DO.get(id);
 }
 
-async function call(env, objectName, op, codeHmac) {
+async function call(env, objectName, payload) {
   const stub = stubFor(env, objectName);
   let res;
   try {
     res = await stub.fetch('https://do.internal/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(codeHmac === undefined ? { op } : { op, codeHmac }),
+      body: JSON.stringify(payload),
     });
   } catch {
     throw new Error('verification_unavailable'); // safe, generic
@@ -34,9 +34,16 @@ async function call(env, objectName, op, codeHmac) {
   }
 }
 
-export function requestCode(env, objectName, codeHmac) {
-  return call(env, objectName, 'requestCode', codeHmac);
+// Phase 3 issuance transaction.
+export function reserveCode(env, objectName, codeHmac, issuanceId) {
+  return call(env, objectName, { op: 'reserveCode', codeHmac, issuanceId });
+}
+export function confirmCode(env, objectName, issuanceId) {
+  return call(env, objectName, { op: 'confirmCode', issuanceId });
+}
+export function cancelCode(env, objectName, issuanceId) {
+  return call(env, objectName, { op: 'cancelCode', issuanceId });
 }
 export function submitCode(env, objectName, codeHmac) {
-  return call(env, objectName, 'submitCode', codeHmac);
+  return call(env, objectName, { op: 'submitCode', codeHmac });
 }

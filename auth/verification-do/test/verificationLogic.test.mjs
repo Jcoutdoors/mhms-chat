@@ -126,11 +126,11 @@ test('security invariants: state stores only opaque HMAC + timestamps/counters (
   const h = await codeHmac('secret-code-value');
   requestCode(s, T0, h);
   const keys = Object.keys(s).sort();
-  assert.deepEqual(keys, ['attemptsRemaining', 'codeHmac', 'consumed', 'expiresAt', 'lastSendAt', 'sends']);
+  assert.deepEqual(keys, ['activeIssuanceId', 'attemptsRemaining', 'codeHmac', 'consumed', 'expiresAt', 'lastSendAt', 'pending', 'sends']);
   // codeHmac is opaque hex, not the plaintext code.
   assert.match(s.codeHmac, /^[0-9a-f]{64}$/);
   assert.equal(s.codeHmac.includes('secret-code-value'), false);
-  // No email/secret-shaped fields exist anywhere in the serialized state.
+  // No email/secret-shaped fields exist anywhere in the serialized state (incl. any pending issuance).
   const blob = JSON.stringify(s);
   assert.equal(blob.includes('@'), false);
   assert.equal(blob.toLowerCase().includes('secret'), false);
@@ -141,4 +141,102 @@ test('pruneSends drops timestamps older than one hour', () => {
   s.sends = [T0 - HOUR_MS - 1, T0 - 10, T0];
   pruneSends(s, T0);
   assert.deepEqual(s.sends, [T0 - 10, T0]);
+});
+
+// ===== Phase 3 issuance transaction (reserve / confirm / cancel) =====
+import { reserveCode, confirmCode, cancelCode, PENDING_TTL_MS } from '../src/verificationLogic.js';
+
+test('tx success: reserve -> confirm makes code active; cooldown+hourly committed exactly once', async () => {
+  const s = defaultState();
+  const h = await codeHmac('112233');
+  assert.equal(reserveCode(s, T0, h, 'iss-A').result.ok, true);
+  // pending is NOT submittable yet
+  assert.equal(submitCode(s, T0 + 1, h).result.reason, 'no_active_code');
+  // confirm -> active + one send committed
+  assert.equal(confirmCode(s, T0 + 2, 'iss-A').result.ok, true);
+  assert.equal(s.sends.length, 1);
+  assert.equal(s.lastSendAt, T0 + 2);
+  assert.equal(submitCode(s, T0 + 3, h).result.ok, true);
+  // duplicate confirm does not commit a second send
+  confirmCode(s, T0 + 4, 'iss-A');
+  assert.equal(s.sends.length, 1);
+});
+
+test('tx failure: reserve -> cancel leaves no active code, no cooldown, retry allowed immediately', async () => {
+  const s = defaultState();
+  const h = await codeHmac('445566');
+  reserveCode(s, T0, h, 'iss-A');
+  assert.equal(cancelCode(s, T0 + 1, 'iss-A').result.ok, true);
+  assert.equal(s.pending, null);
+  assert.equal(s.sends.length, 0);        // nothing committed
+  assert.equal(s.lastSendAt, null);
+  assert.equal(submitCode(s, T0 + 2, h).result.reason, 'no_active_code');
+  // immediate re-reserve allowed (no cooldown retained)
+  assert.equal(reserveCode(s, T0 + 3, await codeHmac('778899'), 'iss-B').result.ok, true);
+});
+
+test('tx idempotency: dup cancel safe; cancel-after-confirm keeps active; confirm-after-cancel cannot reactivate', async () => {
+  const s = defaultState();
+  const h = await codeHmac('111000');
+  reserveCode(s, T0, h, 'iss-A');
+  confirmCode(s, T0 + 1, 'iss-A');
+  // cancel after confirm must NOT remove the active confirmed code
+  cancelCode(s, T0 + 2, 'iss-A');
+  assert.equal(s.codeHmac, h);
+  assert.equal(submitCode(s, T0 + 3, h).result.ok, true);
+  // confirm-after-cancel on a fresh pending
+  const s2 = defaultState();
+  const h2 = await codeHmac('222000');
+  reserveCode(s2, T0, h2, 'iss-X');
+  cancelCode(s2, T0 + 1, 'iss-X');
+  cancelCode(s2, T0 + 2, 'iss-X'); // duplicate cancel safe
+  assert.equal(confirmCode(s2, T0 + 3, 'iss-X').result.ok, false); // cannot reactivate a canceled issuance
+  assert.equal(submitCode(s2, T0 + 4, h2).result.reason, 'no_active_code');
+});
+
+test('tx concurrency: two reserves, older confirm/cancel cannot beat newer; exactly one active', async () => {
+  // Two concurrent requests (serialized by the DO): A then B reserve before either confirms.
+  const s = defaultState();
+  const hA = await codeHmac('AAA111');
+  const hB = await codeHmac('BBB222');
+  reserveCode(s, T0, hA, 'iss-A');
+  reserveCode(s, T0, hB, 'iss-B'); // supersedes pending A
+  // A's delivery fails -> cancel(A) must NOT touch pending B
+  assert.equal(cancelCode(s, T0 + 1, 'iss-A').result.ok, true);
+  assert.equal(s.pending && s.pending.issuanceId, 'iss-B');
+  // B's delivery succeeds -> confirm B
+  assert.equal(confirmCode(s, T0 + 2, 'iss-B').result.ok, true);
+  // A can never promote (superseded)
+  assert.equal(confirmCode(s, T0 + 3, 'iss-A').result.ok, false);
+  // exactly one active code (B), one send committed
+  assert.equal(s.sends.length, 1);
+  assert.equal(submitCode(s, T0 + 4, hB).result.ok, true);
+});
+
+test('tx concurrency: older successful-then-confirm cannot revive after a newer active code', async () => {
+  const s = defaultState();
+  const hA = await codeHmac('OLD111');
+  const hB = await codeHmac('NEW222');
+  reserveCode(s, T0, hA, 'iss-A');
+  reserveCode(s, T0, hB, 'iss-B');
+  confirmCode(s, T0 + 1, 'iss-B');            // B becomes active
+  assert.equal(confirmCode(s, T0 + 2, 'iss-A').result.ok, false); // stale A confirm rejected
+  assert.equal(submitCode(s, T0 + 3, hA).result.ok, false);       // A never valid
+  assert.equal(submitCode(s, T0 + 4, hB).result.ok, true);
+});
+
+test('tx pending expiry: abandoned pending is lazily cleaned and cannot later confirm', async () => {
+  const s = defaultState();
+  const h = await codeHmac('909090');
+  reserveCode(s, T0, h, 'iss-A');
+  const late = T0 + PENDING_TTL_MS + 1;
+  assert.equal(confirmCode(s, late, 'iss-A').result.ok, false); // expired pending
+  assert.equal(s.pending, null); // lazily cleaned
+});
+
+test('tx: submit while pending (no active) is rejected', async () => {
+  const s = defaultState();
+  const h = await codeHmac('303030');
+  reserveCode(s, T0, h, 'iss-A');
+  assert.equal(submitCode(s, T0 + 1, h).result.reason, 'no_active_code');
 });

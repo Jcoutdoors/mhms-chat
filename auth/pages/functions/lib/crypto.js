@@ -44,6 +44,14 @@ export function constantTimeEqual(a, b) {
   return diff === 0;
 }
 
+// Opaque, cryptographically random issuance identifier (32 hex chars = 128 bits).
+// Never disclosed to the client; used only to match reserve/confirm/cancel.
+export function generateIssuanceId() {
+  const buf = new Uint8Array(16);
+  crypto.getRandomValues(buf);
+  return toHex(buf);
+}
+
 // Cryptographically secure 6-digit code, leading zeros preserved, modulo-bias avoided.
 export function generateSixDigitCode() {
   // Rejection sampling over [0, 999999]; 2^20 = 1048576, reject >= 1000000.

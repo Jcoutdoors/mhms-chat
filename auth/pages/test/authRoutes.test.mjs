@@ -36,7 +36,10 @@ function makeMockDO(received) {
           const now = Date.now();
           let s = store.get(name) || vlogic.defaultState();
           let result;
-          if (body.op === 'requestCode') ({ state: s, result } = vlogic.requestCode(s, now, body.codeHmac));
+          if (body.op === 'reserveCode') ({ state: s, result } = vlogic.reserveCode(s, now, body.codeHmac, body.issuanceId));
+          else if (body.op === 'confirmCode') ({ state: s, result } = vlogic.confirmCode(s, now, body.issuanceId));
+          else if (body.op === 'cancelCode') ({ state: s, result } = vlogic.cancelCode(s, now, body.issuanceId));
+          else if (body.op === 'requestCode') ({ state: s, result } = vlogic.requestCode(s, now, body.codeHmac));
           else if (body.op === 'submitCode') ({ state: s, result } = vlogic.submitCode(s, now, body.codeHmac));
           else if (body.op === 'canSend') result = vlogic.canSend(s, now);
           else result = { ok: false, reason: 'unknown_op' };
@@ -124,20 +127,52 @@ test('verify/request: invalid email / malformed JSON -> invalid_request', async 
   const malformed = await request.onRequestPost({ request: req('POST', { origin: OK, body: '{not json' }), env });
   assert.equal(malformed.status, 400);
 });
-test('verify/request: success is generic; DO gets ONLY {op,codeHmac} (no raw email, no plaintext code)', async () => {
+test('verify/request: success is generic; DO only ever gets {op,codeHmac,issuanceId} (no raw email, no plaintext code)', async () => {
   const received = [];
   const env = makeEnv({ LOCAL_EMAIL_CAPTURE: '1', _received: received });
   const res = await request.onRequestPost({ request: req('POST', { origin: OK, body: { email: 'Person@Example.com' } }), env });
   assert.equal(res.status, 200);
-  const body = await res.json();
-  const code = body.__localCode;
+  const code = (await res.json()).__localCode;
   assert.match(code, /^\d{6}$/);
-  assert.equal(received.length, 1);
-  assert.deepEqual(Object.keys(received[0]).sort(), ['codeHmac', 'op']);
-  assert.match(received[0].codeHmac, /^[0-9a-f]{64}$/);
-  const blob = JSON.stringify(received[0]);
-  assert.equal(blob.includes('@'), false, 'no raw email to DO');
-  assert.equal(blob.includes(code), false, 'no plaintext code to DO');
+  // reserve then confirm (2 DO calls), both with only allowed opaque fields.
+  assert.deepEqual(received.map((b) => b.op), ['reserveCode', 'confirmCode']);
+  for (const b of received) {
+    for (const k of Object.keys(b)) assert.ok(['op', 'codeHmac', 'issuanceId'].includes(k), `unexpected DO field ${k}`);
+    if (b.codeHmac) assert.match(b.codeHmac, /^[0-9a-f]{64}$/);
+    if (b.issuanceId) assert.match(b.issuanceId, /^[0-9a-f]{32}$/);
+    const blob = JSON.stringify(b);
+    assert.equal(blob.includes('@'), false, 'no raw email to DO');
+    assert.equal(blob.includes(code), false, 'no plaintext code to DO');
+  }
+});
+
+test('verify/request: delivery FAILURE cancels issuance — no active code, no cooldown, immediate retry OK', async () => {
+  const env = makeEnv(); // no capture; control global fetch
+  const orig = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: false }); // Resend rejects
+  try {
+    const r = await request.onRequestPost({ request: req('POST', { origin: OK, body: { email: 'f@a.com' } }), env });
+    assert.equal(r.status, 503);
+    assert.equal((await r.json()).error, 'service_unavailable');
+  } finally { globalThis.fetch = orig; }
+  // No active code was promoted -> submit finds nothing.
+  const sub = await submit.onRequestPost({ request: req('POST', { origin: OK, body: { email: 'f@a.com', code: '123456' } }), env });
+  assert.equal(sub.status, 401);
+  // Cooldown/hourly were NOT committed -> immediate retry succeeds.
+  env.LOCAL_EMAIL_CAPTURE = '1';
+  const retry = await request.onRequestPost({ request: req('POST', { origin: OK, body: { email: 'f@a.com' } }), env });
+  assert.equal(retry.status, 200);
+  const code = (await retry.json()).__localCode;
+  const ok = await submit.onRequestPost({ request: req('POST', { origin: OK, body: { email: 'f@a.com', code } }), env });
+  assert.equal(ok.status, 200);
+});
+
+test('verify/request: delivery SUCCESS commits cooldown exactly once (second request within 60s -> rate_limited)', async () => {
+  const env = makeEnv({ LOCAL_EMAIL_CAPTURE: '1' });
+  const first = await request.onRequestPost({ request: req('POST', { origin: OK, body: { email: 'c@a.com' } }), env });
+  assert.equal(first.status, 200);
+  const second = await request.onRequestPost({ request: req('POST', { origin: OK, body: { email: 'c@a.com' } }), env });
+  assert.equal(second.status, 429); // committed cooldown blocks immediate resend
 });
 test('verify/request: cooldown -> rate_limited (via real DO logic)', async () => {
   const env = makeEnv({ LOCAL_EMAIL_CAPTURE: '1' });
@@ -146,12 +181,6 @@ test('verify/request: cooldown -> rate_limited (via real DO logic)', async () =>
   assert.equal(second.status, 429);
   assert.equal((await second.json()).error, 'rate_limited');
 });
-test('verify/request: Resend failure -> service_unavailable (no capture mode)', async () => {
-  // No LOCAL_EMAIL_CAPTURE; transport defaults to global fetch which we override via env? -> use adapter test below.
-  // Here, simulate by pointing RESEND to a failing transport through the email module test instead.
-  assert.ok(true);
-});
-
 // ---------- verify/submit + full flow ----------
 test('full flow: request -> submit (case/space variant) -> token -> logout -> 401', async () => {
   const env = makeEnv({ LOCAL_EMAIL_CAPTURE: '1' });

@@ -25,6 +25,10 @@ export function buildVerificationEmail(code) {
 // Sends the code. Returns { ok, captured?, code? }. Throws nothing to callers
 // beyond a boolean result so a delivery failure degrades to a generic response.
 export async function sendVerificationCode(env, to, code, transport = globalThis.fetch) {
+  // Local-only forced failure for integration testing (never set in production).
+  if (env && env.LOCAL_EMAIL_FAIL === '1') {
+    return { ok: false };
+  }
   // Local-only capture for integration testing. Never active in production.
   if (env && env.LOCAL_EMAIL_CAPTURE === '1') {
     return { ok: true, captured: true, code };
