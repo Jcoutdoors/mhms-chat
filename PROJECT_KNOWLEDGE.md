@@ -1022,10 +1022,13 @@ alarms). Concurrency safety relies on Durable Object per-instance serialization.
 compares HMACs only. This keeps the plaintext code out of the DO entirely, puts
 `CODE_HMAC_SECRET` in one place (the Pages Function), and leaves the DO needing no secret.
 
-**Rate limiting (decision):** prefer the Cloudflare **Workers Rate Limiting binding** (IP-keyed)
-on the Pages Functions — validated in Wrangler config but currently under experimental
-`[[unsafe.bindings]]`; account entitlement to be confirmed at an approved deploy. Fallback:
-a separate IP-keyed Durable Object (defined, not implemented). **Not used:** KV (eventually
+**Rate limiting (decision — RESOLVED):** a dedicated fixed-window **`IpRateLimitDO`** Durable
+Object (exported by `collier-verification-do`; Pages binding `IP_RATE_LIMIT_DO`) protects both
+`/verify/request` and `/verify/submit`, keyed on the trusted `CF-Connecting-IP` via an opaque
+`HMAC-SHA256(clientIP, IDENTITY_KEY_SECRET)` name (stores only `{windowStart,count}`; limit
+5/60s). **Fail closed** (binding unavailable / no trusted IP / limiter error → 503). The earlier
+experimental `AUTH_IP_LIMITER` (Workers Rate Limiting binding, `[[unsafe.bindings]]`, fail-open)
+was **removed** — entitlement-independent and deployable now. **Not used:** KV (eventually
 consistent) or zone WAF rules (domain is not a Cloudflare DNS zone).
 
 **Tests:** `cd auth/verification-do && npm test` → 15/15 (issuance, expiry, attempts, success/
@@ -1082,9 +1085,10 @@ no raw email, no plaintext code, no secret.
 verified in Resend (DEPLOY BLOCKER)**; tested with a mock transport + local capture; no real
 email sent.
 
-**Rate limiting:** binding-first (`AUTH_IP_LIMITER`, trusted `CF-Connecting-IP`, 5/60s) with the
-per-identity DO limits as the tighter control; binding **entitlement unconfirmed without deploy**;
-IP-keyed DO fallback defined.
+**Rate limiting:** dedicated fixed-window `IpRateLimitDO` (Pages binding `IP_RATE_LIMIT_DO`),
+trusted `CF-Connecting-IP`, opaque HMAC key, 5/60s, **fail closed**, entitlement-independent; the
+per-identity DO cooldown/hourly limits remain the tighter control. (Implemented on branch
+`vif-phase3-ip-ratelimit`; the experimental fail-open `AUTH_IP_LIMITER` path was removed.)
 
 **Tests:** `auth/pages` 35/35 (CORS, verify request/submit, session, `/token`, logout, DO
 integration via the real Phase 2 logic, email adapter, rate-limit adapter) + full **workerd**

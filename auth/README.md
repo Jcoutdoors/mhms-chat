@@ -93,12 +93,18 @@ on `send`, DKIM `resend._domainkey`, MX `feedback-smtp…amazonses.com`, optiona
 (3) create an **auth-specific** `RESEND_API_KEY`. Do NOT silently fall back to
 `notifications.nexgenrva.com`. Email is tested here only with a mock transport / local capture.
 
-### IP rate limiting
-Adapter is binding-first (`AUTH_IP_LIMITER`, Workers Rate Limiting) keyed on the trusted
-`CF-Connecting-IP` (never `X-Forwarded-For`); limit 5/60s (coarse defense-in-depth; the DO
-per-identity cooldown/hourly limits are the tighter control). The binding config validated in
-Wrangler but **account entitlement is unconfirmed without a deploy**; if unavailable at deploy,
-wire the deterministic IP-keyed Durable Object fallback (do not use KV; no public endpoint).
+### IP rate limiting (dedicated Durable Object, FAIL CLOSED)
+Both `/verify/request` and `/verify/submit` call `checkIpRateLimit` first. It uses a dedicated
+fixed-window Durable Object **`IpRateLimitDO`** (exported by the same `collier-verification-do`
+Worker; bound to Pages as `IP_RATE_LIMIT_DO`), keyed on the **trusted `CF-Connecting-IP`** only
+(never `X-Forwarded-For`). The DO is addressed by an **opaque `HMAC-SHA256(clientIP,
+IDENTITY_KEY_SECRET)`** name and stores **only** `{ windowStart, count }` — never the raw IP.
+Limit **5 / 60s** per IP (coarse defense-in-depth; the per-identity cooldown/hourly limits in
+`VerificationDO` remain the tighter control). **Fail closed:** if the `IP_RATE_LIMIT_DO` binding
+is unavailable, the trusted IP is missing, or the limiter call errors, the verify routes return
+`service_unavailable` (503) rather than run unprotected. The earlier experimental fail-open
+`AUTH_IP_LIMITER` (Workers Rate Limiting binding) path was **removed** — no entitlement dependency.
+This entitlement-independent DO limiter is deployable now (no KV; no public endpoint).
 
 ### Local integration proof
 `functions/__do-binding-check.js` (Phase 2) has been **removed**. Full-flow local proof uses
@@ -137,7 +143,8 @@ app's GitHub Pages pipeline.
 - Future Phase 3 routes (`/verify/request`, `/verify/submit`, `/token`, `/logout`)
   will live here. **Not implemented.**
 
-**`auth/verification-do/`** — the Worker exporting `VerificationDO`. No public route
+**`auth/verification-do/`** — the Worker exporting `VerificationDO` **and `IpRateLimitDO`**
+(fixed-window IP limiter; separate class, same Worker). No public route
 (default fetch 404). The Durable Object implementation + tests.
 
 ### Local validation / proof commands (no deploy)
@@ -239,24 +246,17 @@ class_name = "VerificationDO"
 script_name = "collier-verification-do"   # the DO Worker deployed from auth/verification-do/
 ```
 
-## IP rate limiting decision
-- **Preferred: Cloudflare Workers Rate Limiting binding** on the auth Pages
-  Functions, keyed by client IP (`CF-Connecting-IP`). Verified to validate in
-  Wrangler config (`env.AUTH_IP_LIMITER (ratelimit)`), but wrangler currently
-  exposes it under experimental `[[unsafe.bindings]]` ("may change or break"), and
-  **account entitlement can only be confirmed by an approved isolated deploy**.
-  Ready config (applied on the Pages project in Phase 3):
-  ```toml
-  [[unsafe.bindings]]
-  name = "AUTH_IP_LIMITER"
-  type = "ratelimit"
-  namespace_id = "1001"
-  simple = { limit = 30, period = 60 }
-  ```
-- **Fallback (if the binding is unavailable/unstable at deploy): a separate
-  IP-keyed Durable Object** (same serialization guarantees; `idFromName` = a hash
-  of the client IP). Not implemented in Phase 2 (only defined) to keep scope to
-  what the verification flow needs.
+## IP rate limiting decision (RESOLVED — dedicated Durable Object, fail closed)
+- **Chosen: a dedicated fixed-window Durable Object `IpRateLimitDO`** (exported by
+  `collier-verification-do`; Pages binding `IP_RATE_LIMIT_DO`), keyed on the trusted
+  `CF-Connecting-IP` via an opaque `HMAC-SHA256(clientIP, IDENTITY_KEY_SECRET)` name.
+  Stores only `{ windowStart, count }`. Limit **5 / 60s**. **Entitlement-independent**
+  (works on the Workers free plan alongside `VerificationDO`) and deployable now.
+- **Fail closed:** binding unavailable / missing trusted IP / limiter error →
+  `/verify/*` return `service_unavailable` (503). Never runs unprotected.
+- **Removed:** the earlier experimental Cloudflare Workers Rate Limiting binding
+  (`AUTH_IP_LIMITER`, `[[unsafe.bindings]]`, fail-open) — its account entitlement was
+  unconfirmable without a deploy, so it was replaced by the DO limiter above.
 - **Not used:** KV (eventually consistent — unsafe for security limits); zone-level
   WAF rate-limiting rules (the domain is not a Cloudflare-managed DNS zone —
   authoritative NS is NS1/Squarespace).
