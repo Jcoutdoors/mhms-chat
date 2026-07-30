@@ -90,9 +90,12 @@ return `401` — but a **previously captured pre-logout token remains valid unti
 expiry**, because the server only checks the signature and `exp`. This was explicitly observed
 during production validation (re-presenting a captured pre-logout cookie still returned `200`).
 
-**Risk is bounded:** the cookie is `HttpOnly` (not reachable by JS/XSS), `Secure` (HTTPS only),
-and `SameSite=Lax`, so exfiltration requires TLS-level MITM or device compromise. This is the
-standard trade-off for stateless JWT-style sessions and is currently accepted.
+**Risk is reduced by the cookie attributes:** `HttpOnly` prevents JavaScript, including typical XSS,
+from directly reading the cookie value; `Secure` restricts transmission to HTTPS; and `SameSite=Lax`
+limits cross-site sending. These controls reduce cookie-exfiltration and replay risk but do not
+eliminate session abuse. A compromised browser or device, malicious extension, exposed browser
+profile, debugging access, or another cookie-capture path could still obtain or use a valid session.
+The fixed 30-day replay window is the accepted trade-off for the current phase.
 
 **Fix, if the trade-off changes (do NOT change the architecture without review):** options include
 a server-side revocation list / session-version check in the DO, shorter token lifetime with
