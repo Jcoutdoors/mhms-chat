@@ -99,6 +99,14 @@ on `send`, DKIM `resend._domainkey`, MX `feedback-smtp…amazonses.com`, optiona
 (3) create an **auth-specific** `RESEND_API_KEY`. Do NOT silently fall back to
 `notifications.nexgenrva.com`. Email is tested here only with a mock transport / local capture.
 
+**Shared single domain (free-plan constraint):** the free Resend plan allows only one domain, so the
+same verified `send.mentalhealthmadesimple.life` serves **both** auth verification
+(`verification@…`) and the notification Worker (`notifications@…`). The notification Worker's sender
+migration to this domain is prepared separately (see the notification-domain migration PR and
+`cloudflare-workers/notification-worker.js`). Removing the old `notifications.nexgenrva.com` domain to
+free the slot causes a **controlled notification outage** during cutover. The domain is **not
+verified** until Resend confirms it.
+
 ### IP rate limiting (dedicated Durable Object, TRUE ROLLING WINDOWS, FAIL CLOSED)
 Both `/verify/request` and `/verify/submit` call `checkIpRateLimit` first. It uses a dedicated
 **trailing rolling-window** Durable Object **`IpRateLimitDO`** (exported by the same

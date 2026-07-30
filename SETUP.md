@@ -294,10 +294,16 @@ and do NOT weaken `retainConfiguredChannels()`, the QA guard, or QA fixture memb
 The auth service (`auth/pages/` + `auth/verification-do/`) is implemented but **not deployed**,
 and the live chat still uses the old token Worker. Before any approved deploy:
 
-1. **Resend branded domain (BLOCKER):** verify `send.mentalhealthmadesimple.life` in the auth
-   Resend account and add the Resend-provided DNS records at Squarespace/NS1 (SPF TXT on `send`,
-   DKIM `resend._domainkey`, MX → `feedback-smtp.us-east-1.amazonses.com`, optional DMARC).
-   Create an **auth-specific** `RESEND_API_KEY`. Do not fall back to `notifications.nexgenrva.com`.
+1. **Resend branded domain (BLOCKER):** verify `send.mentalhealthmadesimple.life` in Resend and add
+   the Resend-provided DNS records at Squarespace/NS1 (SPF TXT on `send`, DKIM `resend._domainkey`,
+   MX → `feedback-smtp.us-east-1.amazonses.com`, optional DMARC). The free Resend plan allows only
+   **one** domain, so this single verified domain serves **both** senders:
+   `notifications@send.mentalhealthmadesimple.life` (notification Worker) and
+   `verification@send.mentalhealthmadesimple.life` (auth). Because the current
+   `notifications.nexgenrva.com` domain must be removed first, cutover incurs a **controlled
+   notification-email outage** (see the notification-domain migration PR/runbook). Create an
+   **auth-specific** `RESEND_API_KEY` for the auth service; the notification Worker keeps its own
+   `cats-notifications` key (scoped "All domains", expected to remain valid after the swap).
 2. **Secrets** (`auth/pages/` only; never committed) via `wrangler pages secret put <NAME>`:
    `IDENTITY_KEY_SECRET`, `CODE_HMAC_SECRET`, `SESSION_SIGNING_SECRET`, `STREAM_SECRET`,
    `RESEND_API_KEY`, and **`IP_RATE_LIMIT_KEY_SECRET`** (dedicated key for the opaque IP-rate-limit
