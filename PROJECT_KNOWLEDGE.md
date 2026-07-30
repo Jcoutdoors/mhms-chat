@@ -1053,11 +1053,12 @@ Cloudflare/email/real secrets. Identity + Featured Updates suites remain green.
 
 ## Verified Identity Foundation — Phase 3 (server-side authentication routes)
 
-**Status:** implemented in `auth/pages/` (branch `vif-phase3-auth-routes`). **NOT deployed; NO
-chat cutover.** The live chat app still uses the old raw-`user_id` token Worker, which is
-**unchanged**; the **impersonation vulnerability remains OPEN** and is closed only in Phase 4
-(app cutover to authenticated `/token`) and Phase 5 (retire the old Worker). No Stream data
-accessed/modified. Profile Photos not begun.
+**Status:** implemented in `auth/pages/` and **deployed independently to production** (on `main`;
+see the "independent production deployment + browser matrix" subsection below). **NO chat
+cutover:** the live chat app still uses the old raw-`user_id` token Worker, which is **unchanged**;
+the **impersonation vulnerability remains OPEN** and is closed only in Phase 4 (app cutover to
+authenticated `/token`) and Phase 5 (retire the old Worker). No Stream data accessed/modified.
+Profile Photos not begun.
 
 **Routes (all `POST`; exact-origin credentialed CORS; `Cache-Control: no-store`; generic error
 shape `{ok:false,error}`):** `/verify/request`, `/verify/submit`, `/token`, `/logout`. Meaning
@@ -1097,9 +1098,11 @@ abandoned pendings lazily expire (~2 min). The legacy single-shot `requestCode` 
 DO stores only opaque HMAC + timestamps/counters + a pending `{issuanceId,codeHmac,reservedAt}` —
 no raw email, no plaintext code, no secret.
 
-**Email:** branded MHMS sender `verification@send.mentalhealthmadesimple.life` — **domain not yet
-verified in Resend (DEPLOY BLOCKER)**; tested with a mock transport + local capture; no real
-email sent.
+**Email:** branded MHMS sender `verification@send.mentalhealthmadesimple.life` — the sending
+domain `send.mentalhealthmadesimple.life` is **verified in Resend and live in production** (the
+single free-plan domain shared with the notification Worker; auth uses the dedicated
+`cats-auth-verification` key). Real verification emails were confirmed delivered during production
+validation (see the deployment subsection below).
 
 **Rate limiting:** dedicated **trailing rolling-window** `IpRateLimitDO` (Pages binding
 `IP_RATE_LIMIT_DO`), trusted `CF-Connecting-IP`, opaque HMAC key from the **dedicated**
@@ -1112,7 +1115,53 @@ per-identity DO cooldown/hourly limits remain the tighter control. (Implemented 
 integration via the real Phase 2 logic, email adapter, rate-limit adapter) + full **workerd**
 local integration (request→DO→capture→submit→cookie→`/token`→logout→401, origin rejection).
 `auth/verification-do` 15/15, identity 9/9, Featured Updates 41/41. Pages Functions build compiles;
-DO dry-run valid. The Phase 2 `__do-binding-check.js` proof route was removed.
+DO dry-run valid. The Phase 2 `__do-binding-check.js` proof route was removed. (Current suite
+counts after the Phase 3 IP-rate-limit and notification-migration work: `auth/pages` 44/44,
+`auth/verification-do` 37/37, identity 9/9, Featured 41/41, notifications 12/12.)
+
+### Phase 3 — independent production deployment + browser matrix (COMPLETE; NO chat cutover)
+
+The auth service is **deployed to production and validated independently of the chat app.** The
+live chat remains on the legacy token Worker; **this is not a Phase 4 cutover** and the
+impersonation vulnerability stays open until Phase 4/5.
+
+**Deployed:** Durable Object Worker `collier-verification-do` (exports `VerificationDO` +
+`IpRateLimitDO`; migrations v1+v2; default public fetch is inert `404`; **no secrets**) and the
+Pages project `collier-auth-proof` at custom domain `auth.mentalhealthmadesimple.life`. Six
+secrets are provisioned to the Pages project only (`IDENTITY_KEY_SECRET`, `CODE_HMAC_SECRET`,
+`SESSION_SIGNING_SECRET`, `STREAM_SECRET`, `RESEND_API_KEY`, `IP_RATE_LIMIT_KEY_SECRET`);
+`STREAM_SECRET` reuses the existing Stream app secret (not rotated); `RESEND_API_KEY` is the
+dedicated `cats-auth-verification` key.
+
+**Production topology (schemefully same-site under `mentalhealthmadesimple.life`):**
+- top-level: `https://www.mentalhealthmadesimple.life` (Squarespace; CATS at `/catscourse#community`)
+- iframe: `chat.mentalhealthmadesimple.life` (GitHub Pages)
+- auth: `auth.mentalhealthmadesimple.life` (Cloudflare Pages)
+
+All three are subdomains of the registrable domain `mentalhealthmadesimple.life` (`.life` is a
+public suffix), so the relationship is **same-site** — proven, not assumed.
+
+**Browser matrix (all PASS)** — Chrome desktop normal · Chrome desktop incognito · Safari desktop
+normal · Safari desktop private · Safari on iPhone · **real Squarespace iframe**. Conducted via a
+temporary, unlinked, self-contained harness on the chat origin (only approved origin for the
+credentialed CORS), then removed (PRs #14/#15 add+rename, #16 remove; harness URL now `404`; no
+runtime/bundle/Worker files changed).
+
+**Proven behavior (production):**
+- verification request succeeds within rate limits; code submission succeeds (`HTTP 200`)
+- `__Host-collier_session` is set with `Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000`, no `Domain`
+- the session cookie is **not** visible to JavaScript (`document.cookie` never exposes it)
+- `/token` succeeds with the authenticated session and returns the **deterministic** Stream
+  `user_id` (matches the canonical Phase 1 algorithm; token value never displayed/logged)
+- logout clears the browser cookie; post-logout `/token` returns `401 session_required`
+- **`SameSite=Lax` works in the real Squarespace iframe**; Safari ITP (desktop, private, iPhone)
+  did **not** break the same-site session flow
+- IP rate limiting returns `429` + `Retry-After` (trailing rolling window); per-identity
+  cooldown/hourly limits are independent per email identity (each identity hitting its own limit
+  returned `429` while alternate identities remained usable — not a browser/iframe/cookie failure)
+
+**Cookie/session prerequisite for Phase 4: satisfied.** See `TECHNICAL_DEBT.md` for the one known
+design characteristic (stateless sessions are not server-side revocable on logout).
 
 ## QA SAFETY GUARDRAILS (required for all QA work)
 

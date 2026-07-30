@@ -1,3 +1,21 @@
+# VIF Phase 3 Review Handoff — independent auth deployment + browser matrix (2026-07-30)
+
+Independent production deployment of the Verified Identity auth service, validated end-to-end.
+**No chat cutover** — the live chat still uses the legacy token Worker; Phase 4 not started.
+
+**Merged to `main` (merge-commit method):**
+- PR #12 — rolling-window IP rate limiter (`IpRateLimitDO`) — merge `bad44ad`
+- PR #13 — notification-domain migration (sender → `notifications@send.mentalhealthmadesimple.life`) — merge `d057f16`
+- PR #14 / #15 / #16 — temporary browser-matrix harness: add → rename (Jekyll fix) → **removed**. Net-zero repo change; harness URL now `404`; no runtime/bundle/Worker files touched.
+
+**Deployed (production):** DO Worker `collier-verification-do` (`VerificationDO` + `IpRateLimitDO`, migrations v1/v2, inert `404` default fetch, no secrets); Pages `collier-auth-proof` at `auth.mentalhealthmadesimple.life`. Six secrets provisioned to the Pages project only; `STREAM_SECRET` reuses the existing (un-rotated) Stream secret; `RESEND_API_KEY` = dedicated `cats-auth-verification` key. Notification Worker `cats-notifications` redeployed on the verified shared domain (version `1b474bab`).
+
+**Validation:** full production API validation (CORS/headers, verification email from `verification@send.mentalhealthmadesimple.life`, code submit incl. leading-zero, `__Host` cookie attributes, `/token` deterministic `user_id`, logout → `401`, reuse/cooldown/concurrency/rate-limit + `Retry-After`, origin enforcement) **all pass**. **Browser matrix all PASS** — Chrome normal/incognito, Safari normal/private, iPhone Safari, and the **real Squarespace iframe** (proves `SameSite=Lax` same-site cookie works in the embedded context; Safari ITP did not break it).
+
+**Status:** independent auth deployment complete · API validation complete · browser matrix complete · temporary harness removed · **Phase 4 not started** · Phase 4 cookie/session prerequisite **satisfied**. Known characteristic: stateless sessions are not server-side revocable on logout (see `TECHNICAL_DEBT.md`). Details in `PROJECT_KNOWLEDGE.md` → "Phase 3 — independent production deployment + browser matrix".
+
+---
+
 # v63.1 Review Handoff — Featured Updates ("New from Mark")
 
 Branch: `v63.1-featured-updates`. MERGED via PR #4 and LIVE in production as of 2026-07-27
