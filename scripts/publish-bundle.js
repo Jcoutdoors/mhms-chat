@@ -6,22 +6,27 @@
 //   - validates every filename against the managed contract (publishPlan.js),
 //   - rejects any managed-looking path that is not a REAL regular file
 //     (symlinks, directories, sockets, devices are fatal, never followed),
-//   - refuses to run if a managed ROOT artifact has uncommitted changes,
+//   - FAILS CLOSED if Git state cannot be determined and refuses to publish over
+//     a dirty managed root artifact,
 //   - stages new/changed artifacts to temporary siblings, verifies each by
 //     SHA-256, and only then atomically renames them into place,
 //   - removes stale numeric chunks ONLY after the new set is installed,
+//   - on ANY post-install failure prints exact Git recovery for the captured
+//     pre-publication set (it does NOT claim to auto-rollback),
 //   - cleans temporary files on any failure and exits nonzero,
 //   - never touches non-managed files (index.html, CNAME, assets, docs, source).
 //
-// Recovery from a partial failure is Git, not a bespoke rollback engine:
-//   git restore -- chat.bundle.js <numeric chunks>
+// Recovery is Git, not a bespoke engine. It restores the pre-publication tracked
+// artifacts and cleans any newly installed (untracked) chunk:
+//   git restore -- chat.bundle.js <pre-existing numeric chunks>
+//   git clean -f -- <newly installed chunks>
 //
 // Usage:
 //   node scripts/publish-bundle.js --dry-run   # validate + plan; writes NOTHING
 //   node scripts/publish-bundle.js             # staged install + verify
 //
-// The core is exported as runPublish({distDir, rootDir, dryRun, dirtyChecker, log})
-// so adversarial tests can drive it against temporary fixture directories.
+// The core is exported as runPublish({...}) so adversarial tests can drive it
+// against temporary fixture directories and temporary Git repositories.
 
 'use strict';
 
@@ -43,14 +48,14 @@ function short(h) { return h ? h.slice(0, 12) : '(none)'; }
 
 // Inspect a directory: hash managed REGULAR files; treat any managed-looking
 // non-regular path (symlink/dir/socket/device) as a FATAL error. Non-managed
-// entries are ignored entirely (never stat/hash/touch). Returns {files, errors}.
+// entries are ignored entirely. Returns {files, errors}.
 function inspectDir(dir) {
   let names;
-  try { names = fs.readdirSync(dir); } catch (e) { return { files: [], errors: [`cannot read directory ${dir}`] }; }
+  try { names = fs.readdirSync(dir); } catch { return { files: [], errors: [`cannot read directory ${dir}`] }; }
   const files = [];
   const errors = [];
   for (const name of names) {
-    if (!isManagedName(name)) continue; // not managed -> leave alone
+    if (!isManagedName(name)) continue;
     const full = path.join(dir, name);
     let st;
     try { st = fs.lstatSync(full); } catch { errors.push(`cannot lstat managed path ${full}`); continue; }
@@ -61,43 +66,82 @@ function inspectDir(dir) {
   return { files, errors };
 }
 
-// Default dirty-artifact checker: which of `managedNames` have uncommitted
-// changes in the working tree (staged or unstaged), via `git status --porcelain`.
-// Only managed artifacts are considered — unrelated dirty files are ignored.
+// STRUCTURED, fail-closed dirty check. Returns:
+//   { ok:true, dirty:[names] }            — Git queried successfully
+//   { ok:false, error:'git_status_failed' } — Git unavailable / not a repo / status failed
+// Uses porcelain -z (NUL-delimited) and parses deliberately. Never surfaces raw
+// output for unrelated repository state.
 function gitDirtyManaged(rootDir, managedNames) {
-  let out = '';
+  // Recovery is Git-based, so Git MUST be available even for a pure-add publish:
+  // confirm we are inside a work tree first, and fail closed otherwise.
   try {
-    out = execFileSync('git', ['status', '--porcelain', '--', ...managedNames], { cwd: rootDir, encoding: 'utf8' });
+    execFileSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: rootDir, stdio: ['ignore', 'ignore', 'ignore'] });
   } catch {
-    return []; // no git / not a repo: skip the guard rather than block
+    return { ok: false, error: 'git_status_failed' };
+  }
+  if (!managedNames.length) return { ok: true, dirty: [] };
+  let out;
+  try {
+    out = execFileSync('git', ['status', '--porcelain', '-z', '--', ...managedNames], { cwd: rootDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return { ok: false, error: 'git_status_failed' };
   }
   const dirty = new Set();
-  for (const line of out.split('\n')) {
-    if (!line.trim()) continue;
-    const file = line.slice(3).trim();
-    const base = path.basename(file);
+  // -z records: "XY <path>\0" (and for renames a second "<path>\0"). We pass an
+  // explicit managed pathspec, so every emitted path is a managed artifact.
+  for (const rec of out.split('\0')) {
+    if (!rec) continue;
+    const p = rec.length >= 4 && rec[2] === ' ' ? rec.slice(3) : rec; // status-prefixed or bare rename source
+    const base = path.basename(p);
     if (managedNames.includes(base)) dirty.add(base);
   }
-  return [...dirty];
+  return { ok: true, dirty: [...dirty] };
 }
 
 function tempNameFor(name) {
   const t = `.pub-staging.${name}.${process.pid}.${crypto.randomBytes(6).toString('hex')}`;
-  // Invariant: a staging name must NEVER be a managed artifact name.
   if (isManagedName(t)) throw new Error(`staging name collided with managed contract: ${t}`);
   return t;
 }
 
+// Deterministic ordering for recovery output: bundle first, then numeric chunks
+// ascending, then anything else lexically. Purely cosmetic (stable messages).
+function orderManaged(names) {
+  const bundle = names.filter((n) => n === BUNDLE_NAME);
+  const rest = names.filter((n) => n !== BUNDLE_NAME).sort((a, b) => {
+    const na = parseInt(a, 10); const nb = parseInt(b, 10);
+    return (Number.isNaN(na) || Number.isNaN(nb)) ? a.localeCompare(b) : na - nb;
+  });
+  return [...bundle, ...rest];
+}
+
+// Build the Git recovery instruction from the PRE-PUBLICATION captured set.
+// Restores pre-existing tracked artifacts; cleans newly installed (untracked) chunks.
+function buildRecovery(preManagedNames, newlyInstalledNames) {
+  const restore = orderManaged(preManagedNames.length ? preManagedNames.slice() : [BUNDLE_NAME]);
+  const lines = [`  git restore -- ${restore.join(' ')}`];
+  if (newlyInstalledNames.length) lines.push(`  git clean -f -- ${orderManaged(newlyInstalledNames.slice()).join(' ')}`);
+  return lines.join('\n');
+}
+
+// Best-effort removal of temporary staging files. Never throws.
+function cleanup(rootDir, temps) {
+  for (const t of temps) { try { fs.rmSync(path.join(rootDir, t), { force: true }); } catch {} }
+}
+
 // Core. Returns { exitCode, report, messages }. Never calls process.exit.
 function runPublish(opts) {
-  const distDir = opts.distDir;
-  const rootDir = opts.rootDir;
+  const { distDir, rootDir } = opts;
   const dryRun = !!opts.dryRun;
   const dirtyChecker = opts.dirtyChecker || gitDirtyManaged;
   const log = opts.log || (() => {});
-  // Test-only seams; production defaults to real fs so behavior is unchanged.
-  const copyFile = opts.copyFile || ((src, dst) => fs.copyFileSync(src, dst));
+  // Test-only seams; production defaults are real fs so behavior is unchanged.
+  const copyFile = opts.copyFile || ((s, d) => fs.copyFileSync(s, d));
+  const renameFile = opts.renameFile || ((s, d) => fs.renameSync(s, d));
+  const removeFile = opts.removeFile || ((p) => fs.rmSync(p, { force: true }));
   const finalHashFile = opts.finalHashFile || sha256File;
+  const finalInspect = opts.finalInspect || inspectDir;
+
   const messages = [];
   const say = (m) => { messages.push(m); log(m); };
   const fail = (code, m) => { say(`✘ ${m}`); return { exitCode: code, report: null, messages }; };
@@ -112,20 +156,24 @@ function runPublish(opts) {
   const inspectErrors = [...distI.errors, ...rootI.errors];
   if (inspectErrors.length) { for (const e of inspectErrors) say(`  ✘ ${e}`); return fail(1, 'filesystem validation failed'); }
 
-  // 3. Plan (name validity, duplicates, exactly-one-bundle handled in planner).
+  // 3. Plan.
   const plan = computePublishPlan({ distFiles: distI.files, rootFiles: rootI.files });
   if (!plan.ok) { for (const p of plan.problems) say(`  ✘ ${p}`); return fail(1, 'plan validation failed'); }
 
-  // 4. Dirty managed-artifact guard (managed root artifacts must be clean).
-  const rootManagedNames = rootI.files.map((f) => f.name);
-  const dirty = dirtyChecker(rootDir, rootManagedNames);
-  if (dirty.length) {
-    say(`  ✘ uncommitted changes in managed artifact(s): ${dirty.join(', ')}`);
-    say(`    resolve first, e.g.:  git restore -- ${dirty.join(' ')}`);
+  const rootManagedNames = rootI.files.map((f) => f.name); // pre-publication managed set
+
+  // 4. Dirty managed-artifact guard — FAIL CLOSED (applies to dry-run too).
+  const dirtyRes = dirtyChecker(rootDir, rootManagedNames);
+  if (!dirtyRes || dirtyRes.ok !== true) {
+    return fail(1, `cannot determine Git state (${(dirtyRes && dirtyRes.error) || 'git_status_failed'}) — refusing to publish`);
+  }
+  if (dirtyRes.dirty.length) {
+    say(`  ✘ uncommitted changes in managed artifact(s): ${dirtyRes.dirty.join(', ')}`);
+    say(`    resolve first, e.g.:  git restore -- ${dirtyRes.dirty.join(' ')}`);
     return fail(1, 'managed artifacts are not clean');
   }
 
-  const distMap = new Map(distI.files.filter((f) => isManagedName(f.name)).map((f) => [f.name, f.hash]));
+  const distMap = new Map(distI.files.map((f) => [f.name, f.hash]));
 
   // Report intent.
   say(`\ncopy/replace (${plan.toCopy.length}):`);
@@ -133,7 +181,7 @@ function runPublish(opts) {
   if (plan.unchanged.length) say(`unchanged (${plan.unchanged.length}): ${plan.unchanged.join(', ')}`);
   say(`remove stale numeric chunks (${plan.toRemove.length}): ${plan.toRemove.map((r) => r.name).join(', ') || '(none)'}`);
 
-  // 5. DRY-RUN stops here: no temp files, no copies, no renames, no removals.
+  // 5. DRY-RUN stops here: no temps, no copies, no renames, no removals.
   if (dryRun) {
     say(`\nverify plan (${plan.verify.length}):`);
     for (const v of plan.verify) {
@@ -147,46 +195,62 @@ function runPublish(opts) {
     return { exitCode: 0, report: { copied: [], replaced: [], removed: [], unchanged: plan.unchanged, verified: [] }, messages };
   }
 
-  // 6-8. STAGED install: write temps, verify temps, then atomic renames.
-  const staged = []; // { temp, finalName }
+  // --- capture the PRE-PUBLICATION set for recovery (before any write) ---
+  const preManagedNames = rootManagedNames.slice();
+  const newlyInstalled = plan.toCopy.filter((c) => c.reason === 'new').map((c) => c.name);
+  const recovery = buildRecovery(preManagedNames, newlyInstalled);
+  const failInstalled = (code, m) => { say(`✘ ${m}`); say('  RECOVERY (restores the committed pre-publication artifacts; no automatic rollback was performed):'); say(recovery); return { exitCode: code, report: null, messages }; };
+
+  let installBegun = false;
+  const staged = [];   // { temp, finalName }
   const renamed = [];
-  const numericChunkList = plan.finalSet.filter(isNumericChunk);
-  const restoreCmd = `git restore -- ${BUNDLE_NAME} ${numericChunkList.join(' ')}`.trim();
-  try {
-    for (const c of plan.toCopy) {
-      const temp = tempNameFor(c.name);
-      const tempPath = path.join(rootDir, temp);
+
+  // 6-7. Stage temps + verify each against dist (pre-install; no recovery needed).
+  for (const c of plan.toCopy) {
+    const temp = tempNameFor(c.name);
+    const tempPath = path.join(rootDir, temp);
+    try {
       copyFile(path.join(distDir, c.name), tempPath);
-      // 7. verify staged temp against dist source.
-      const th = sha256File(tempPath);
-      if (th !== distMap.get(c.name)) {
-        cleanup(rootDir, staged.map((s) => s.temp).concat(temp));
-        return fail(2, `staging hash mismatch for ${c.name} (dist ${short(distMap.get(c.name))} != staged ${short(th)})`);
-      }
-      staged.push({ temp, finalName: c.name });
+    } catch (e) {
+      cleanup(rootDir, staged.map((s) => s.temp).concat(temp));
+      return fail(3, `staging copy failed for ${c.name}: ${e.message}`);
     }
-    // 8. atomic renames into final names.
-    for (const s of staged) {
-      fs.renameSync(path.join(rootDir, s.temp), path.join(rootDir, s.finalName));
+    const th = sha256File(tempPath);
+    if (th !== distMap.get(c.name)) {
+      cleanup(rootDir, staged.map((s) => s.temp).concat(temp));
+      return fail(2, `staging hash mismatch for ${c.name} (dist ${short(distMap.get(c.name))} != staged ${short(th)})`);
+    }
+    staged.push({ temp, finalName: c.name });
+  }
+
+  // 8. Atomic renames into final names. Any failure after the FIRST rename is post-install.
+  for (const s of staged) {
+    try {
+      renameFile(path.join(rootDir, s.temp), path.join(rootDir, s.finalName));
+      installBegun = true;
       renamed.push(s.finalName);
+    } catch (e) {
+      cleanup(rootDir, staged.filter((x) => !renamed.includes(x.finalName)).map((x) => x.temp));
+      if (installBegun) return failInstalled(3, `rename failed for ${s.finalName}: ${e.message}`);
+      return fail(3, `rename failed for ${s.finalName}: ${e.message}`);
     }
-  } catch (e) {
-    // Clean any un-renamed temps; if some renames already happened, direct to git.
-    cleanup(rootDir, staged.filter((s) => !renamed.includes(s.finalName)).map((s) => s.temp));
-    say(`  ✘ staging/rename failure: ${e.message}`);
-    if (renamed.length) say(`    RECOVERY: ${restoreCmd}`);
-    return { exitCode: 3, report: null, messages };
   }
 
-  // 9. Remove stale numeric chunks ONLY after successful install.
+  // 9. Remove stale numeric chunks ONLY after successful install. Any mutation here is post-install.
   const removed = [];
+  if (plan.toRemove.length) installBegun = true;
   for (const r of plan.toRemove) {
-    if (!isNumericChunk(r.name)) continue; // triple-guard: never remove anything else
-    try { fs.rmSync(path.join(rootDir, r.name), { force: true }); removed.push(r.name); }
-    catch (e) { say(`  ✘ failed to remove stale ${r.name}: ${e.message}`); return { exitCode: 3, report: null, messages }; }
+    if (!isNumericChunk(r.name)) continue; // triple-guard
+    try { removeFile(path.join(rootDir, r.name)); removed.push(r.name); }
+    catch (e) { return failInstalled(3, `failed to remove stale ${r.name}: ${e.message}`); }
   }
 
-  // 10. Final verification: every final artifact matches dist; no unexpected extras.
+  // 10. Final inspection + verification (errors here are post-install failures).
+  const finalI = finalInspect(rootDir);
+  if (finalI.errors && finalI.errors.length) {
+    for (const e of finalI.errors) say(`  ✘ ${e}`);
+    return failInstalled(4, 'final filesystem inspection failed');
+  }
   let mismatches = 0;
   for (const v of plan.verify) {
     const rp = path.join(rootDir, v.name);
@@ -194,12 +258,10 @@ function runPublish(opts) {
     try { ok = fs.existsSync(rp) && fs.lstatSync(rp).isFile() && finalHashFile(rp) === v.distHash; } catch { ok = false; }
     if (!ok) mismatches++;
   }
-  const finalRoot = inspectDir(rootDir).files.map((f) => f.name).filter(isManagedName);
-  const unexpected = finalRoot.filter((n) => !plan.finalSet.includes(n));
+  const finalManaged = finalI.files.map((f) => f.name).filter(isManagedName);
+  const unexpected = finalManaged.filter((n) => !plan.finalSet.includes(n));
   if (mismatches > 0 || unexpected.length) {
-    say(`  ✘ final verification failed (mismatches=${mismatches}, unexpected=${unexpected.join(',') || 'none'})`);
-    say(`    RECOVERY: ${restoreCmd}`);
-    return { exitCode: 4, report: null, messages };
+    return failInstalled(4, `final verification failed (mismatches=${mismatches}, unexpected=${unexpected.join(',') || 'none'})`);
   }
 
   const copied = plan.toCopy.filter((c) => c.reason === 'new').map((c) => c.name);
@@ -213,11 +275,6 @@ function runPublish(opts) {
   return { exitCode: 0, report: { copied, replaced, removed, unchanged: plan.unchanged, verified: plan.verify.map((v) => v.name) }, messages };
 }
 
-// Best-effort removal of temporary staging files. Never throws.
-function cleanup(rootDir, temps) {
-  for (const t of temps) { try { fs.rmSync(path.join(rootDir, t), { force: true }); } catch {} }
-}
-
 // CLI entry.
 function main() {
   const dryRun = process.argv.includes('--dry-run');
@@ -227,4 +284,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { runPublish, inspectDir, gitDirtyManaged, tempNameFor, cleanup, DIST_DIR, REPO_ROOT };
+module.exports = { runPublish, inspectDir, gitDirtyManaged, tempNameFor, buildRecovery, cleanup, DIST_DIR, REPO_ROOT };

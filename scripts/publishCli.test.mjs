@@ -6,11 +6,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { runPublish, tempNameFor } from './publish-bundle.js';
+import { execFileSync } from 'node:child_process';
+import { runPublish, tempNameFor, buildRecovery } from './publish-bundle.js';
 import { isManagedName } from './publishPlan.js';
 
 const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
-const noGitDirty = () => [];        // tests never depend on git
+// Structured, fail-closed dirty-check contract: {ok:true, dirty:[]} | {ok:false, error}.
+const noGitDirty = () => ({ ok: true, dirty: [] });
 const quiet = () => {};
 
 // Build { distDir, rootDir } under a fresh temp base. Specs map name -> content
@@ -135,7 +137,7 @@ test('#19 dry-run performs no writes and no timestamp changes', () => {
 // #20
 test('#20 a dirty managed root artifact causes failure before any write', () => {
   const fx = fixture({ 'chat.bundle.js': 'B2' }, { 'chat.bundle.js': 'B1' });
-  const res = runPublish({ distDir: fx.distDir, rootDir: fx.rootDir, dirtyChecker: () => ['chat.bundle.js'], log: quiet });
+  const res = runPublish({ distDir: fx.distDir, rootDir: fx.rootDir, dirtyChecker: () => ({ ok: true, dirty: ['chat.bundle.js'] }), log: quiet });
   assert.equal(res.exitCode, 1);
   assert.ok(res.messages.join('\n').includes('uncommitted changes'));
   assert.equal(fs.readFileSync(path.join(fx.rootDir, 'chat.bundle.js'), 'utf8'), 'B1', 'not modified');
@@ -159,4 +161,128 @@ test('unrelated root files (index.html/CNAME) survive a real publish', () => {
   assert.equal(res.exitCode, 0);
   assert.equal(fs.readFileSync(path.join(fx.rootDir, 'index.html'), 'utf8'), '<html>');
   assert.equal(fs.readFileSync(path.join(fx.rootDir, 'CNAME'), 'utf8'), 'chat.example');
+});
+
+// ================= Re-review: fail-closed dirty check + Git recovery =================
+
+// Build a real temporary Git repo as rootDir (committed rootSpec) + a plain distDir.
+function gitFixture(distSpec = {}, committedRootSpec = {}) {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'pub-git-'));
+  const distDir = path.join(base, 'dist');
+  const rootDir = path.join(base, 'repo');
+  fs.mkdirSync(distDir); fs.mkdirSync(rootDir);
+  for (const [n, v] of Object.entries(distSpec)) fs.writeFileSync(path.join(distDir, n), v);
+  const git = (...args) => execFileSync('git', args, { cwd: rootDir, stdio: 'ignore' });
+  git('init', '-q');
+  git('config', 'user.email', 't@t.test'); git('config', 'user.name', 'T');
+  for (const [n, v] of Object.entries(committedRootSpec)) fs.writeFileSync(path.join(rootDir, n), v);
+  git('add', '-A'); git('commit', '-q', '-m', 'init');
+  return { base, distDir, rootDir, git: (...a) => execFileSync('git', a, { cwd: rootDir, encoding: 'utf8' }) };
+}
+const read = (dir, n) => fs.readFileSync(path.join(dir, n), 'utf8');
+const exists = (dir, n) => fs.existsSync(path.join(dir, n));
+
+// re#1 + re#2: Git dirty-check command failure fails closed — real publish AND dry-run.
+test('re#1/#2 non-Git root => dirty check fails closed (real + dry-run), no writes', () => {
+  const fx = fixture({ 'chat.bundle.js': 'B' }, {}); // rootDir is NOT a git repo
+  for (const dryRun of [false, true]) {
+    const res = runPublish({ distDir: fx.distDir, rootDir: fx.rootDir, log: quiet, dryRun }); // default (real) gitDirtyManaged
+    assert.equal(res.exitCode, 1, `dryRun=${dryRun}`);
+    assert.ok(res.messages.join('\n').includes('git_status_failed'));
+    assert.deepEqual(listManaged(fx.rootDir), []); // nothing written
+  }
+});
+
+// re#9: a clean Git repo proceeds to a successful publish.
+test('re#9 clean Git state proceeds to publish', () => {
+  const fx = gitFixture({ 'chat.bundle.js': 'V2' }, { 'chat.bundle.js': 'V1', 'index.html': '<x>' });
+  const res = runPublish({ distDir: fx.distDir, rootDir: fx.rootDir, log: quiet }); // real dirty check, clean
+  assert.equal(res.exitCode, 0);
+  assert.equal(read(fx.rootDir, 'chat.bundle.js'), 'V2');
+});
+
+// re#10: a dirty managed artifact blocks before any write (real Git).
+test('re#10 dirty managed artifact blocks before any write (real Git)', () => {
+  const fx = gitFixture({ 'chat.bundle.js': 'V2' }, { 'chat.bundle.js': 'V1' });
+  fs.writeFileSync(path.join(fx.rootDir, 'chat.bundle.js'), 'LOCAL-EDIT'); // uncommitted change
+  const res = runPublish({ distDir: fx.distDir, rootDir: fx.rootDir, log: quiet });
+  assert.equal(res.exitCode, 1);
+  assert.ok(res.messages.join('\n').includes('uncommitted changes'));
+  assert.equal(read(fx.rootDir, 'chat.bundle.js'), 'LOCAL-EDIT'); // not overwritten
+});
+
+// re#3: recovery lists a pre-existing stale chunk (restore), not clean.
+test('re#3 recovery includes a pre-existing stale chunk in git restore', () => {
+  const fx = fixture({ 'chat.bundle.js': 'V2' }, { 'chat.bundle.js': 'V1', '387.chunk.js': 'C1' });
+  const res = run(fx, { finalHashFile: () => 'wrong' }); // force post-install failure
+  assert.equal(res.exitCode, 4);
+  const blob = res.messages.join('\n');
+  assert.ok(/git restore -- .*chat\.bundle\.js.*387\.chunk\.js/.test(blob), 'restore lists stale pre-existing chunk');
+  assert.equal(blob.includes('git clean'), false, 'no new files to clean');
+});
+
+// re#4: recovery cleans a newly installed chunk that did not exist before.
+test('re#4 recovery cleans a newly installed chunk', () => {
+  const fx = fixture({ 'chat.bundle.js': 'V2', '555.chunk.js': 'N' }, { 'chat.bundle.js': 'V1' });
+  const res = run(fx, { finalHashFile: () => 'wrong' });
+  assert.equal(res.exitCode, 4);
+  assert.ok(res.messages.join('\n').includes('git clean -f -- 555.chunk.js'));
+});
+
+// re#5: stale-removal failure prints recovery.
+test('re#5 stale-removal failure prints recovery', () => {
+  const fx = fixture({ 'chat.bundle.js': 'V2' }, { 'chat.bundle.js': 'V1', '999.chunk.js': 'stale' });
+  const res = run(fx, { removeFile: () => { throw new Error('EPERM'); } });
+  assert.equal(res.exitCode, 3);
+  const blob = res.messages.join('\n');
+  assert.ok(blob.includes('RECOVERY'));
+  assert.ok(blob.includes('git restore --'));
+});
+
+// re#6: partial rename failure prints recovery.
+test('re#6 partial final-rename failure prints recovery', () => {
+  const fx = fixture({ 'chat.bundle.js': 'B', '555.chunk.js': 'N' }, {}); // two new files to rename
+  let calls = 0;
+  const renameFail2nd = (s, d) => { calls++; if (calls >= 2) throw new Error('rename EIO'); fs.renameSync(s, d); };
+  const res = run(fx, { renameFile: renameFail2nd });
+  assert.equal(res.exitCode, 3);
+  assert.ok(res.messages.join('\n').includes('RECOVERY'));
+});
+
+// re#7: final inspectDir error is fatal with recovery.
+test('re#7 final inspection error is fatal with recovery', () => {
+  const fx = fixture({ 'chat.bundle.js': 'V2' }, { 'chat.bundle.js': 'V1' });
+  const badFinalInspect = () => ({ files: [], errors: ['managed path is a symlink (rejected, not followed): /x'] });
+  const res = run(fx, { finalInspect: badFinalInspect });
+  assert.equal(res.exitCode, 4);
+  const blob = res.messages.join('\n');
+  assert.ok(blob.includes('final filesystem inspection failed'));
+  assert.ok(blob.includes('RECOVERY'));
+});
+
+// re#8: after a partial publish (replace + stale remove + new add) that fails final
+// verify, the printed Git recovery restores the exact committed pre-publication set.
+test('re#8 Git recovery restores committed pre-publication set after final-verify failure', () => {
+  const fx = gitFixture(
+    { 'chat.bundle.js': 'V2', '555.chunk.js': 'NEW' },
+    { 'chat.bundle.js': 'V1', '387.chunk.js': 'C1' },
+  );
+  const res = runPublish({ distDir: fx.distDir, rootDir: fx.rootDir, log: quiet, finalHashFile: () => 'wrong' });
+  assert.equal(res.exitCode, 4);
+  // The tool has already mutated the tree: bundle replaced, 387 removed, 555 added.
+  assert.equal(read(fx.rootDir, 'chat.bundle.js'), 'V2');
+  assert.equal(exists(fx.rootDir, '387.chunk.js'), false);
+  assert.equal(exists(fx.rootDir, '555.chunk.js'), true);
+  // Recovery instruction must name both restore and clean parts.
+  const rec = buildRecovery(['chat.bundle.js', '387.chunk.js'], ['555.chunk.js']);
+  assert.ok(res.messages.join('\n').includes('git restore -- chat.bundle.js 387.chunk.js'));
+  assert.ok(res.messages.join('\n').includes('git clean -f -- 555.chunk.js'));
+  // Execute the recovery and confirm the committed pre-publication state is restored.
+  fx.git('restore', '--', 'chat.bundle.js', '387.chunk.js');
+  fx.git('clean', '-f', '--', '555.chunk.js');
+  assert.equal(read(fx.rootDir, 'chat.bundle.js'), 'V1', 'bundle restored');
+  assert.equal(read(fx.rootDir, '387.chunk.js'), 'C1', 'stale chunk restored');
+  assert.equal(exists(fx.rootDir, '555.chunk.js'), false, 'new chunk cleaned');
+  // And the repo is clean again.
+  assert.equal(fx.git('status', '--porcelain').trim(), '');
 });
