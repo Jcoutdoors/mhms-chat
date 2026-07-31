@@ -4,6 +4,7 @@ import { isApprovedOrigin, rejectOrigin, preflight, jsonApproved, errorApproved 
 import { readSessionCookie } from './lib/cookie.js';
 import { verifySession } from './lib/session.js';
 import { createStreamToken } from './lib/stream.js';
+import { isInstructorSub } from './lib/instructor.js';
 
 export function onRequestOptions(context) { return preflight(context.request, 'POST, OPTIONS'); }
 
@@ -19,7 +20,11 @@ export async function onRequestPost(context) {
 
   try {
     const token = await createStreamToken(session.sub, env.STREAM_SECRET);
-    return jsonApproved({ ok: true, token, user_id: session.sub });
+    // Instructor is derived SERVER-SIDE from the verified session subject against a
+    // server-controlled allowlist. The browser cannot supply or override it, and it
+    // fails closed to false. Additive field; token/user_id behavior is unchanged.
+    const instructor = await isInstructorSub(env, session.sub);
+    return jsonApproved({ ok: true, token, user_id: session.sub, instructor });
   } catch {
     return errorApproved('service_unavailable', 503);
   }

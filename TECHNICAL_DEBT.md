@@ -101,3 +101,19 @@ The fixed 30-day replay window is the accepted trade-off for the current phase.
 a server-side revocation list / session-version check in the DO, shorter token lifetime with
 refresh, or a rotating `ver` claim. Any change is a separately reviewed decision, not part of the
 current deployment.
+
+## VIF Phase 4A2 — instructor CLAIM is server-derived, but Stream enforcement is not hardened
+
+`/token` now returns a **server-derived** `instructor` boolean (from the `INSTRUCTOR_EMAILS`
+allowlist, matched against the verified session subject — see `auth/README.md`). This removes the
+browser as the *source of truth* for the claim. However it does **not** enforce privilege at
+Stream: the chat app still writes a client-writable `instructor` custom field onto the Stream user
+at connect time, and announcement/@everyone gating is **client-side UI only** — Stream itself does
+not restrict who may post. So a determined verified user could still set `instructor:true` on their
+own Stream user via the SDK. Impact is low for a closed cohort, and the app does not yet consume the
+new server claim (Phase 4B).
+
+**Fix, when prioritized (separate initiative):** enforce instructor/privileged actions server-side
+via Stream roles / channel permissions (server SDK role assignment or channel-level permission
+policies), and have the app trust only the server-derived `/token` claim. Out of scope for Phase 4A2
+(which is authentication/identity, not authorization enforcement).

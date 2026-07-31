@@ -32,6 +32,17 @@ export const AUTH_CONFIG = {
     bindingName: 'IP_RATE_LIMIT_DO',
   },
 
+  // Server-derived instructor claim (Phase 4A2). The instructor allowlist is a
+  // server binding (a plaintext Cloudflare environment variable, or a secret —
+  // read as a string either way), a separator-delimited list of instructor emails.
+  // It is authorization data: server-controlled, never browser-visible, never
+  // logged, never returned. Emails are normalized+hashed canonically and compared
+  // to the verified session subject. FAIL CLOSED to instructor:false if unset.
+  // Organization-configurable later by pointing at a different binding value.
+  instructor: {
+    bindingName: 'INSTRUCTOR_EMAILS',
+  },
+
   // Branded verification email (MHMS). from-domain must be verified in Resend
   // before production (see auth/README.md). Not organization-agnostic by design.
   email: {
