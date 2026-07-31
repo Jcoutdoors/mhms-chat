@@ -1,71 +1,99 @@
-// publishPlan tests (Phase 4A1). Pure planner; no filesystem. Deterministic.
+// publishPlan tests (Phase 4A1, hardened). Pure planner + filename contract.
+// No filesystem. Deterministic.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BUNDLE_NAME, isManagedArtifact, computePublishPlan } from './publishPlan.js';
+import { BUNDLE_NAME, MANAGED_CHUNK_RE, validateName, isManagedName, isNumericChunk, computePublishPlan } from './publishPlan.js';
 
-test('isManagedArtifact matches only webpack outputs', () => {
-  assert.equal(isManagedArtifact('chat.bundle.js'), true);
-  assert.equal(isManagedArtifact('387.chunk.js'), true);
-  assert.equal(isManagedArtifact('abc.chunk.js'), true);
-  // Everything else at the repo root is NOT managed and must never be touched.
-  for (const n of ['index.html', 'CNAME', 'favicon.ico', 'atlas-hero-white.png', 'README.md', 'src/index.jsx', 'webpack.config.js', 'package.json']) {
-    assert.equal(isManagedArtifact(n), false, n);
+test('managed contract: only chat.bundle.js and ^[0-9]+\\.chunk\\.js$', () => {
+  assert.equal(isManagedName('chat.bundle.js'), true);
+  assert.equal(isManagedName('387.chunk.js'), true);
+  assert.equal(isManagedName('0.chunk.js'), true);
+  // NON-managed look-alikes must be left untouched:
+  for (const n of ['vendor.chunk.js', 'custom.chunk.js', 'chunk.js', 'a.chunk.js.bak', 'chunky.js', 'index.html', 'CNAME', 'README.md', '387.chunk.JS', 'chat.bundle.js.map']) {
+    assert.equal(isManagedName(n), false, n);
+  }
+  assert.equal(MANAGED_CHUNK_RE.test('387.chunk.js'), true);
+  assert.equal(isNumericChunk('387.chunk.js'), true);
+  assert.equal(isNumericChunk('chat.bundle.js'), false);
+});
+
+test('validateName rejects structurally unsafe names', () => {
+  for (const [n, reason] of [['', 'empty'], ['.', 'dot-segment'], ['..', 'dot-segment'], ['a/b.js', 'path-separator'], ['a\\b.js', 'path-separator'], ['/abs/chat.bundle.js', 'path-separator'], ['x\0y', 'null-byte']]) {
+    const v = validateName(n);
+    assert.equal(v.ok, false, `${JSON.stringify(n)} should be invalid`);
+    assert.equal(v.reason, reason);
+  }
+  assert.equal(validateName(42).ok, false);
+  assert.equal(validateName('chat.bundle.js').ok, true);
+});
+
+// #1
+test('#1 missing dist/chat.bundle.js => plan not ok', () => {
+  const p = computePublishPlan({ distFiles: [{ name: '387.chunk.js', hash: 'h' }], rootFiles: [] });
+  assert.equal(p.ok, false);
+  assert.ok(p.problems.some((x) => x.includes(BUNDLE_NAME)));
+});
+
+// #5 path traversal, #6 nested path, #7 absolute path — all rejected as invalid input
+test('#5/#6/#7 traversal, nested, and absolute names are rejected', () => {
+  for (const bad of ['../evil.chunk.js', 'a/387.chunk.js', '/abs/chat.bundle.js', '..\\387.chunk.js']) {
+    const p = computePublishPlan({ distFiles: [{ name: 'chat.bundle.js', hash: 'B' }, { name: bad, hash: 'x' }], rootFiles: [] });
+    assert.equal(p.ok, false, bad);
+    assert.ok(p.problems.some((m) => m.includes('invalid filename')), bad);
   }
 });
 
-test('new chunk copied, stale chunk removed, unchanged left alone', () => {
-  const plan = computePublishPlan({
-    distFiles: [
-      { name: 'chat.bundle.js', hash: 'BUNDLE_NEW' },
-      { name: '387.chunk.js', hash: 'H387' },     // unchanged
-      { name: '999.chunk.js', hash: 'H999' },     // new
-    ],
-    rootFiles: [
-      { name: 'chat.bundle.js', hash: 'BUNDLE_OLD' }, // changed
-      { name: '387.chunk.js', hash: 'H387' },          // unchanged
-      { name: '760.chunk.js', hash: 'H760' },          // stale (not in dist)
-      { name: 'index.html', hash: 'X' },               // not managed -> ignored
-    ],
-  });
-  assert.equal(plan.ok, true);
-  assert.deepEqual(plan.toCopy.sort((a, b) => a.name.localeCompare(b.name)), [
-    { name: '999.chunk.js', reason: 'new' },
-    { name: 'chat.bundle.js', reason: 'changed' },
-  ]);
-  assert.deepEqual(plan.unchanged, ['387.chunk.js']);
-  assert.deepEqual(plan.toRemove, [{ name: '760.chunk.js', reason: 'stale' }]);
-  // index.html is never in any list.
-  const allNames = [...plan.toCopy, ...plan.toRemove].map((f) => f.name).concat(plan.unchanged);
-  assert.equal(allNames.includes('index.html'), false);
-});
-
-test('missing generated bundle in dist is a fatal problem', () => {
-  const plan = computePublishPlan({
-    distFiles: [{ name: '387.chunk.js', hash: 'H' }], // no chat.bundle.js
-    rootFiles: [{ name: 'chat.bundle.js', hash: 'H' }],
-  });
-  assert.equal(plan.ok, false);
-  assert.ok(plan.problems.some((p) => p.includes(BUNDLE_NAME)));
-});
-
-test('a dist artifact with no hash is flagged', () => {
-  const plan = computePublishPlan({
-    distFiles: [{ name: 'chat.bundle.js', hash: '' }],
+// #8 duplicate planner names rejected
+test('#8 duplicate filenames in a list are rejected', () => {
+  const p = computePublishPlan({
+    distFiles: [{ name: 'chat.bundle.js', hash: 'B' }, { name: '387.chunk.js', hash: 'A' }, { name: '387.chunk.js', hash: 'A2' }],
     rootFiles: [],
   });
-  assert.equal(plan.ok, false);
-  assert.ok(plan.problems.some((p) => p.includes('no hash')));
+  assert.equal(p.ok, false);
+  assert.ok(p.problems.some((m) => m.includes('duplicate')));
 });
 
-test('identical dist and root => nothing to copy or remove', () => {
-  const files = [
-    { name: 'chat.bundle.js', hash: 'B' },
-    { name: '387.chunk.js', hash: 'C' },
-  ];
-  const plan = computePublishPlan({ distFiles: files, rootFiles: files });
-  assert.equal(plan.ok, true);
-  assert.equal(plan.toCopy.length, 0);
-  assert.equal(plan.toRemove.length, 0);
-  assert.deepEqual(plan.unchanged.sort(), ['387.chunk.js', 'chat.bundle.js']);
-  assert.equal(plan.verify.length, 2);
+// #9 numeric chunk accepted (planned for copy)
+test('#9 a numeric chunk is accepted and planned', () => {
+  const p = computePublishPlan({ distFiles: [{ name: 'chat.bundle.js', hash: 'B' }, { name: '555.chunk.js', hash: 'N' }], rootFiles: [{ name: 'chat.bundle.js', hash: 'B' }] });
+  assert.equal(p.ok, true);
+  assert.deepEqual(p.toCopy, [{ name: '555.chunk.js', reason: 'new' }]);
+  assert.deepEqual(p.finalSet.sort(), ['555.chunk.js', 'chat.bundle.js']);
+});
+
+// #10 non-numeric *.chunk.js preserved (ignored, never copied/removed)
+test('#10 non-numeric *.chunk.js is preserved (ignored by the plan)', () => {
+  const p = computePublishPlan({
+    distFiles: [{ name: 'chat.bundle.js', hash: 'B' }],
+    rootFiles: [{ name: 'chat.bundle.js', hash: 'B' }, { name: 'vendor.chunk.js', hash: 'V' }],
+  });
+  assert.equal(p.ok, true);
+  const touched = [...p.toCopy, ...p.toRemove].map((f) => f.name).concat(p.unchanged);
+  assert.equal(touched.includes('vendor.chunk.js'), false);
+});
+
+// #11 unrelated root files preserved
+test('#11 unrelated root files are never in any plan list', () => {
+  const p = computePublishPlan({
+    distFiles: [{ name: 'chat.bundle.js', hash: 'B' }],
+    rootFiles: [{ name: 'chat.bundle.js', hash: 'B' }, { name: 'index.html', hash: 'x' }, { name: 'CNAME', hash: 'y' }, { name: 'chunk.js', hash: 'z' }, { name: 'a.chunk.js.bak', hash: 'w' }],
+  });
+  assert.equal(p.ok, true);
+  const touched = [...p.toCopy, ...p.toRemove].map((f) => f.name).concat(p.unchanged);
+  for (const n of ['index.html', 'CNAME', 'chunk.js', 'a.chunk.js.bak']) assert.equal(touched.includes(n), false, n);
+});
+
+test('stale numeric chunk (root, absent from dist) is flagged for removal; bundle never stale', () => {
+  const p = computePublishPlan({
+    distFiles: [{ name: 'chat.bundle.js', hash: 'B2' }],
+    rootFiles: [{ name: 'chat.bundle.js', hash: 'B1' }, { name: '999.chunk.js', hash: 'old' }],
+  });
+  assert.deepEqual(p.toRemove, [{ name: '999.chunk.js', reason: 'stale' }]);
+  assert.deepEqual(p.toCopy, [{ name: 'chat.bundle.js', reason: 'changed' }]);
+});
+
+test('exactly one bundle required (a second bundle cannot occur — duplicates rejected)', () => {
+  const p = computePublishPlan({ distFiles: [{ name: 'chat.bundle.js', hash: 'B' }, { name: 'chat.bundle.js', hash: 'C' }], rootFiles: [] });
+  assert.equal(p.ok, false);
+  assert.ok(p.problems.some((m) => m.includes('duplicate')));
 });

@@ -98,3 +98,68 @@ test('canTransition reflects the table', () => {
 test('changed flag is true only on a real state change', () => {
   assert.equal(transition(S.BOOTING, E.BOOT).changed, true);
 });
+
+// ---- global safety events (Phase 4A1 re-review) ----
+
+test('LOGOUT is global from every state except booting -> entryChoice', () => {
+  for (const st of Object.values(S)) {
+    const r = transition(st, E.LOGOUT);
+    if (st === S.BOOTING) {
+      assert.equal(r.state, S.BOOTING, 'logout is a no-op from booting');
+      assert.equal(r.changed, false);
+    } else {
+      assert.equal(r.state, S.ENTRY_CHOICE, `logout from ${st} should reach entryChoice`);
+    }
+  }
+});
+
+test('logout during verifying cannot later leave the machine authenticated', () => {
+  const afterLogout = transition(S.VERIFYING, E.LOGOUT).state;
+  assert.equal(afterLogout, S.ENTRY_CHOICE);
+  // a stale async VERIFY_OK / TOKEN_OK after logout is a no-op
+  assert.equal(transition(afterLogout, E.VERIFY_OK).changed, false);
+  assert.equal(transition(afterLogout, E.TOKEN_OK).changed, false);
+  assert.equal(transition(afterLogout, E.VERIFY_OK).state, S.ENTRY_CHOICE);
+});
+
+test('logout during authenticating returns entryChoice', () => {
+  assert.equal(transition(S.AUTHENTICATING, E.LOGOUT).state, S.ENTRY_CHOICE);
+});
+
+test('logout during savingProfile returns entryChoice', () => {
+  assert.equal(transition(S.SAVING_PROFILE, E.LOGOUT).state, S.ENTRY_CHOICE);
+});
+
+test('SESSION_EXPIRED handled from every authenticated state', () => {
+  for (const st of [S.AUTHENTICATING, S.LOADING_PROFILE, S.PROFILE_SETUP, S.SAVING_PROFILE, S.COMMUNITY]) {
+    assert.equal(transition(st, E.SESSION_EXPIRED).state, S.SESSION_EXPIRED, `expiry from ${st}`);
+  }
+});
+
+test('session expiry during profileSetup and savingProfile is handled', () => {
+  assert.equal(transition(S.PROFILE_SETUP, E.SESSION_EXPIRED).state, S.SESSION_EXPIRED);
+  assert.equal(transition(S.SAVING_PROFILE, E.SESSION_EXPIRED).state, S.SESSION_EXPIRED);
+});
+
+test('SESSION_EXPIRED is NOT accepted from unauthenticated states (no-op)', () => {
+  for (const st of [S.ENTRY_CHOICE, S.EMAIL_ENTRY, S.CODE_ENTRY, S.VERIFYING]) {
+    assert.equal(transition(st, E.SESSION_EXPIRED).changed, false, st);
+  }
+});
+
+test('invalid async success events after logout remain no-ops', () => {
+  const entry = transition(S.COMMUNITY, E.LOGOUT).state;
+  for (const ev of [E.VERIFY_OK, E.TOKEN_OK, E.SAVE_OK, E.PROFILE_COMPLETE, E.PROFILE_INCOMPLETE]) {
+    const r = transition(entry, ev);
+    assert.equal(r.changed, false, ev);
+    assert.equal(r.state, S.ENTRY_CHOICE);
+  }
+});
+
+test('global events take precedence but per-state transitions still work', () => {
+  // community: EDIT_PROFILE (per-state) still works; LOGOUT (global) also works.
+  assert.equal(transition(S.COMMUNITY, E.EDIT_PROFILE).state, S.PROFILE_SETUP);
+  assert.equal(transition(S.COMMUNITY, E.LOGOUT).state, S.ENTRY_CHOICE);
+  assert.equal(canTransition(S.VERIFYING, E.LOGOUT), true);
+  assert.equal(canTransition(S.COMMUNITY, E.SESSION_EXPIRED), true);
+});
