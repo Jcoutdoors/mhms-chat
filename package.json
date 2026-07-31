@@ -6,7 +6,12 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "test:identity": "node --test src/identity.test.js src/identity.esm.test.mjs",
-    "test:notifications": "node --test cloudflare-workers/notification-worker.test.mjs"
+    "test:notifications": "node --test cloudflare-workers/notification-worker.test.mjs",
+    "test:auth": "node --test src/authClient.test.mjs src/authState.test.mjs src/authErrors.test.mjs src/profileCompleteness.test.mjs src/orgConfig.test.mjs",
+    "test:build": "node --test scripts/publishPlan.test.mjs scripts/publishCli.test.mjs",
+    "build": "webpack",
+    "publish:bundle": "node scripts/publish-bundle.js",
+    "publish:bundle:dry": "node scripts/publish-bundle.js --dry-run"
   },
   "keywords": [],
   "author": "",
