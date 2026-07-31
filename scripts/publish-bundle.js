@@ -69,9 +69,18 @@ function inspectDir(dir) {
 // STRUCTURED, fail-closed dirty check. Returns:
 //   { ok:true, dirty:[names] }            — Git queried successfully
 //   { ok:false, error:'git_status_failed' } — Git unavailable / not a repo / status failed
-// Uses porcelain -z (NUL-delimited) and parses deliberately. Never surfaces raw
-// output for unrelated repository state.
-function gitDirtyManaged(rootDir, managedNames) {
+//
+// The status query targets the FIXED managed contract as Git PATHSPECS, not the
+// files currently present on disk — so a tracked managed artifact DELETED locally
+// (staged OR unstaged) is still detected (a `git ls-files` union would miss staged
+// deletions, which leave the index). Pathspecs `chat.bundle.js` and `*.chunk.js`
+// are passed literally through execFileSync (NO shell glob); Git applies them, and
+// every returned top-level path is re-filtered through isManagedName so only
+// `chat.bundle.js` and numeric `^[0-9]+\.chunk\.js$` count — vendor.chunk.js and
+// other non-numeric chunks are never treated as managed. Detects modified, staged-
+// modified, deleted, staged-deleted, and untracked managed artifacts. Uses porcelain
+// -z (NUL-delimited); the pathspec keeps unrelated repository status out of the output.
+function gitDirtyManaged(rootDir /* , presentManagedNames (unused: contract-driven) */) {
   // Recovery is Git-based, so Git MUST be available even for a pure-add publish:
   // confirm we are inside a work tree first, and fail closed otherwise.
   try {
@@ -79,21 +88,20 @@ function gitDirtyManaged(rootDir, managedNames) {
   } catch {
     return { ok: false, error: 'git_status_failed' };
   }
-  if (!managedNames.length) return { ok: true, dirty: [] };
   let out;
   try {
-    out = execFileSync('git', ['status', '--porcelain', '-z', '--', ...managedNames], { cwd: rootDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    out = execFileSync('git', ['status', '--porcelain', '-z', '--', BUNDLE_NAME, '*.chunk.js'], { cwd: rootDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
   } catch {
     return { ok: false, error: 'git_status_failed' };
   }
   const dirty = new Set();
-  // -z records: "XY <path>\0" (and for renames a second "<path>\0"). We pass an
-  // explicit managed pathspec, so every emitted path is a managed artifact.
+  // -z records: "XY <path>\0" (and for renames a second bare "<path>\0").
   for (const rec of out.split('\0')) {
     if (!rec) continue;
-    const p = rec.length >= 4 && rec[2] === ' ' ? rec.slice(3) : rec; // status-prefixed or bare rename source
+    const p = rec.length >= 4 && rec[2] === ' ' ? rec.slice(3) : rec;
+    if (p.indexOf('/') !== -1) continue;          // top-level managed artifacts only
     const base = path.basename(p);
-    if (managedNames.includes(base)) dirty.add(base);
+    if (isManagedName(base)) dirty.add(base);       // excludes vendor.chunk.js etc.
   }
   return { ok: true, dirty: [...dirty] };
 }

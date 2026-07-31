@@ -286,3 +286,85 @@ test('re#8 Git recovery restores committed pre-publication set after final-verif
   // And the repo is clean again.
   assert.equal(fx.git('status', '--porcelain').trim(), '');
 });
+
+// ============ Re-review 2: deleted / staged / untracked managed artifacts ============
+
+const noTemps = (dir) => assert.deepEqual(stagingTemps(dir), []);
+function expectBlocked(fx, extra = {}) {
+  const res = runPublish({ distDir: fx.distDir, rootDir: fx.rootDir, log: quiet, ...extra });
+  assert.equal(res.exitCode, 1, 'must block');
+  assert.ok(res.messages.join('\n').includes('uncommitted changes'), 'reports uncommitted managed change');
+  noTemps(fx.rootDir); // no writes
+  return res;
+}
+
+// del#1 unstaged deletion of tracked chat.bundle.js blocks publication
+test('del#1 unstaged deletion of tracked chat.bundle.js blocks', () => {
+  const fx = gitFixture({ 'chat.bundle.js': 'V2' }, { 'chat.bundle.js': 'V1', '387.chunk.js': 'C1' });
+  fs.rmSync(path.join(fx.rootDir, 'chat.bundle.js'));            // worktree deletion (unstaged)
+  const res = expectBlocked(fx);
+  assert.ok(res.messages.join('\n').includes('chat.bundle.js'));
+  assert.equal(exists(fx.rootDir, 'chat.bundle.js'), false, 'not recreated by a blocked publish');
+  assert.equal(read(fx.rootDir, '387.chunk.js'), 'C1');         // untouched
+});
+
+// del#2 staged deletion of tracked chat.bundle.js blocks
+test('del#2 staged deletion of tracked chat.bundle.js blocks', () => {
+  const fx = gitFixture({ 'chat.bundle.js': 'V2' }, { 'chat.bundle.js': 'V1' });
+  fx.git('rm', '-q', 'chat.bundle.js');                         // staged deletion
+  const res = expectBlocked(fx);
+  assert.ok(res.messages.join('\n').includes('chat.bundle.js'));
+});
+
+// del#3 unstaged deletion of a tracked numeric chunk blocks
+test('del#3 unstaged deletion of a tracked numeric chunk blocks', () => {
+  const fx = gitFixture({ 'chat.bundle.js': 'V1' }, { 'chat.bundle.js': 'V1', '387.chunk.js': 'C1' });
+  fs.rmSync(path.join(fx.rootDir, '387.chunk.js'));
+  const res = expectBlocked(fx);
+  assert.ok(res.messages.join('\n').includes('387.chunk.js'));
+});
+
+// del#4 staged deletion of a tracked numeric chunk blocks
+test('del#4 staged deletion of a tracked numeric chunk blocks', () => {
+  const fx = gitFixture({ 'chat.bundle.js': 'V1' }, { 'chat.bundle.js': 'V1', '387.chunk.js': 'C1' });
+  fx.git('rm', '-q', '387.chunk.js');
+  const res = expectBlocked(fx);
+  assert.ok(res.messages.join('\n').includes('387.chunk.js'));
+});
+
+// del#5 the same deleted-file condition blocks a DRY-RUN
+test('del#5 a deleted tracked managed artifact also blocks dry-run', () => {
+  const fx = gitFixture({ 'chat.bundle.js': 'V2' }, { 'chat.bundle.js': 'V1' });
+  fs.rmSync(path.join(fx.rootDir, 'chat.bundle.js'));
+  const res = runPublish({ distDir: fx.distDir, rootDir: fx.rootDir, log: quiet, dryRun: true });
+  assert.equal(res.exitCode, 1);
+  assert.ok(res.messages.join('\n').includes('uncommitted changes'));
+  noTemps(fx.rootDir);
+});
+
+// del#6 an untracked numeric chunk at root blocks publication
+test('del#6 an untracked numeric chunk at root blocks', () => {
+  const fx = gitFixture({ 'chat.bundle.js': 'V2' }, { 'chat.bundle.js': 'V1' });
+  fs.writeFileSync(path.join(fx.rootDir, '999.chunk.js'), 'UNTRACKED'); // untracked managed chunk
+  const res = expectBlocked(fx);
+  assert.ok(res.messages.join('\n').includes('999.chunk.js'));
+  assert.equal(read(fx.rootDir, 'chat.bundle.js'), 'V1', 'no writes');
+});
+
+// del#7 an untracked NON-numeric vendor.chunk.js does NOT block and stays untouched
+test('del#7 untracked vendor.chunk.js does not block and is untouched', () => {
+  const fx = gitFixture({ 'chat.bundle.js': 'V2' }, { 'chat.bundle.js': 'V1' });
+  fs.writeFileSync(path.join(fx.rootDir, 'vendor.chunk.js'), 'VENDOR'); // non-managed
+  const res = runPublish({ distDir: fx.distDir, rootDir: fx.rootDir, log: quiet });
+  assert.equal(res.exitCode, 0, 'clean managed set -> publishes');
+  assert.equal(read(fx.rootDir, 'chat.bundle.js'), 'V2', 'bundle updated');
+  assert.equal(read(fx.rootDir, 'vendor.chunk.js'), 'VENDOR', 'non-managed file untouched');
+});
+
+// del#8 a clean repository publishes successfully
+test('del#8 a clean repository publishes successfully', () => {
+  const fx = gitFixture({ 'chat.bundle.js': 'V2' }, { 'chat.bundle.js': 'V1' });
+  const res = runPublish({ distDir: fx.distDir, rootDir: fx.rootDir, log: quiet });
+  assert.equal(res.exitCode, 0);
+  assert.equal(read(fx.rootDir, 'chat.bundle.js'), 'V2');
+});
