@@ -1172,9 +1172,22 @@ runtime/bundle/Worker files changed).
 **Cookie/session prerequisite for Phase 4: satisfied.** See `TECHNICAL_DEBT.md` for the one known
 design characteristic (stateless sessions are not server-side revocable on logout).
 
-### Phase 4A2 — server-derived instructor claim on `/token` (backend only; not yet consumed)
+### Phase 4A2 — server-derived instructor claim on `/token` (DEPLOYED; not yet consumed)
 
-`/token` now returns an additive boolean **`instructor`** alongside `{ok, token, user_id}`,
+**Deployment status (2026-08-03):** the instructor claim is **live in production** on the
+`collier-auth-proof` Pages project — deployment **`a2c173eb-2766-40f4-af6c-e2bb745e6ba5`** (from
+`main` `85d1527`) at `https://auth.mentalhealthmadesimple.life`. `INSTRUCTOR_EMAILS` is provisioned
+as a **Cloudflare secret** (production environment; value never committed). **Production validation
+passed:** an allowlisted instructor session → `/token` `200` with `instructor:true`; a verified
+non-instructor session → `200` with `instructor:false`; both with a JWT-shaped `token`, canonical
+`user_id`, `Cache-Control: no-store`, and approved credentialed CORS. Unauthorized paths unchanged
+(`401 session_required`/`session_invalid`, unapproved origin `403` with no ACAO); verification
+request/submit, session restoration, and logout (cookie cleared → post-logout `401`) all function;
+no sensitive values appear in Cloudflare logs (the route emits none). The **live chat is unchanged**
+and still runs on the legacy token Worker (both confirmed `200`). **Rollback target:** the prior
+Pages deployment `39abd85d-9e18-493f-9386-5fa9a53c4911`.
+
+`/token` returns an additive boolean **`instructor`** alongside `{ok, token, user_id}`,
 derived **server-side** from the verified session subject — never from the browser,
 localStorage, client config, or Stream profile. The session holds only `sub`
 (= `emailToUserId(normalizedEmail)`), so `functions/lib/instructor.js` maps each **configured**
