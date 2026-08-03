@@ -38,11 +38,12 @@ function validateInstructor(value) {
 function tokenResultToEvent(result) {
   const r = result || {};
   if (r.ok === true) {
-    // Validate emptiness via trim (rejects whitespace-only), but CARRY the exact
-    // canonical values unchanged — never trim/normalize the canonical user_id.
-    const validToken = typeof r.token === 'string' && r.token.trim() !== '';
-    const validUserId = typeof r.userId === 'string' && r.userId.trim() !== '';
-    if (validToken && validUserId) {
+    // Accept ONLY already-canonical values: a non-empty string with NO surrounding
+    // whitespace (`x.trim() === x`). Empty, whitespace-only, and padded values are
+    // rejected. We never trim/normalize — the exact original values are carried only
+    // after passing this check.
+    const isCanonical = (v) => typeof v === 'string' && v !== '' && v.trim() === v;
+    if (isCanonical(r.token) && isCanonical(r.userId)) {
       return { event: EVENTS.SESSION_VALID, userId: r.userId, token: r.token, instructor: validateInstructor(r.instructor) };
     }
     return { event: EVENTS.SERVICE_ERROR, reason: 'malformed_token_result' };

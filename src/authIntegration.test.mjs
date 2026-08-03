@@ -28,10 +28,14 @@ test('tokenResultToEvent: malformed nominal success -> SERVICE_ERROR (safe class
     { ok: true, userId: 'cats-x' },                 // missing token
     { ok: true, token: '', userId: 'cats-x' },      // empty token
     { ok: true, token: '   ', userId: 'cats-x' },   // whitespace-only token
+    { ok: true, token: ' token', userId: 'cats-x' },// leading-space token (padded)
+    { ok: true, token: 'token ', userId: 'cats-x' },// trailing-space token (padded)
     { ok: true, token: 123, userId: 'cats-x' },     // non-string token
     { ok: true, token: 't' },                       // missing user_id
     { ok: true, token: 't', userId: '' },           // empty user_id
     { ok: true, token: 't', userId: '   ' },        // whitespace-only user_id
+    { ok: true, token: 't', userId: ' cats-x' },    // leading-space user_id (padded)
+    { ok: true, token: 't', userId: 'cats-x ' },    // trailing-space user_id (padded)
     { ok: true, token: 't', userId: 99 },           // non-string user_id
   ];
   for (const c of cases) {
@@ -41,16 +45,15 @@ test('tokenResultToEvent: malformed nominal success -> SERVICE_ERROR (safe class
     assert.equal('token' in r, false); // token never carried/exposed on the error path
   }
 });
-test('tokenResultToEvent: canonical userId/token are carried EXACTLY (never trimmed/normalized)', () => {
+test('tokenResultToEvent: exact canonical token+userId -> SESSION_VALID, carried byte-for-byte', () => {
   const r = tokenResultToEvent({ ok: true, token: 'a.b.c', userId: 'cats-b70ae3b10ef580824367703b', instructor: true });
-  assert.equal(r.userId, 'cats-b70ae3b10ef580824367703b'); // unchanged
-  assert.equal(r.token, 'a.b.c');
-  // A padded (non-canonical) value that passes the emptiness check is carried EXACTLY,
-  // not silently normalized (canonical /token ids never contain whitespace).
-  const padded = tokenResultToEvent({ ok: true, token: ' t ', userId: ' cats-x ' });
-  assert.equal(padded.event, E.SESSION_VALID);
-  assert.equal(padded.userId, ' cats-x '); // exact, not trimmed
-  assert.equal(padded.token, ' t ');
+  assert.equal(r.event, E.SESSION_VALID);
+  assert.equal(r.userId, 'cats-b70ae3b10ef580824367703b'); // unchanged, byte-for-byte
+  assert.equal(r.token, 'a.b.c');                          // unchanged, byte-for-byte
+  assert.equal(r.instructor, true);
+  // instructor remains literal-true-only (fail closed) on an otherwise-valid result
+  assert.equal(tokenResultToEvent({ ok: true, token: 'a.b.c', userId: 'cats-x', instructor: 'true' }).instructor, false);
+  assert.equal(tokenResultToEvent({ ok: true, token: 'a.b.c', userId: 'cats-x' }).instructor, false);
 });
 test('tokenResultToEvent: 401/session errors -> SESSION_NONE; network/5xx -> SERVICE_ERROR', () => {
   assert.equal(tokenResultToEvent({ ok: false, status: 401, error: 'session_required' }).event, E.SESSION_NONE);
