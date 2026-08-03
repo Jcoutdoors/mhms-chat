@@ -27,9 +27,11 @@ test('tokenResultToEvent: malformed nominal success -> SERVICE_ERROR (safe class
   const cases = [
     { ok: true, userId: 'cats-x' },                 // missing token
     { ok: true, token: '', userId: 'cats-x' },      // empty token
+    { ok: true, token: '   ', userId: 'cats-x' },   // whitespace-only token
     { ok: true, token: 123, userId: 'cats-x' },     // non-string token
     { ok: true, token: 't' },                       // missing user_id
     { ok: true, token: 't', userId: '' },           // empty user_id
+    { ok: true, token: 't', userId: '   ' },        // whitespace-only user_id
     { ok: true, token: 't', userId: 99 },           // non-string user_id
   ];
   for (const c of cases) {
@@ -38,6 +40,17 @@ test('tokenResultToEvent: malformed nominal success -> SERVICE_ERROR (safe class
     assert.equal(r.reason, 'malformed_token_result');
     assert.equal('token' in r, false); // token never carried/exposed on the error path
   }
+});
+test('tokenResultToEvent: canonical userId/token are carried EXACTLY (never trimmed/normalized)', () => {
+  const r = tokenResultToEvent({ ok: true, token: 'a.b.c', userId: 'cats-b70ae3b10ef580824367703b', instructor: true });
+  assert.equal(r.userId, 'cats-b70ae3b10ef580824367703b'); // unchanged
+  assert.equal(r.token, 'a.b.c');
+  // A padded (non-canonical) value that passes the emptiness check is carried EXACTLY,
+  // not silently normalized (canonical /token ids never contain whitespace).
+  const padded = tokenResultToEvent({ ok: true, token: ' t ', userId: ' cats-x ' });
+  assert.equal(padded.event, E.SESSION_VALID);
+  assert.equal(padded.userId, ' cats-x '); // exact, not trimmed
+  assert.equal(padded.token, ' t ');
 });
 test('tokenResultToEvent: 401/session errors -> SESSION_NONE; network/5xx -> SERVICE_ERROR', () => {
   assert.equal(tokenResultToEvent({ ok: false, status: 401, error: 'session_required' }).event, E.SESSION_NONE);

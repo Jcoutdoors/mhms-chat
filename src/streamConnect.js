@@ -27,7 +27,7 @@
 
 'use strict';
 
-const { markProfileVersion } = require('./profileCompleteness.js');
+const { markProfileVersion, isProfileComplete } = require('./profileCompleteness.js');
 
 // The minimal user object used at connect time: the canonical id and NOTHING else.
 function minimalConnectUser(userId) {
@@ -67,9 +67,9 @@ async function connectVerified(client, userId, token) {
     // Connected but the SDK exposed no user object — an access failure, not "new user".
     return { ok: false, error: 'profile_read_failed' };
   }
-  const hasProfile = typeof user.name === 'string' && user.name.trim() !== '';
-  const versioned = typeof user.profile_version === 'number' && user.profile_version >= 1;
-  return { ok: true, status: hasProfile || versioned ? 'existing_profile' : 'bare_user', user };
+  // Completeness uses the SHARED canonical predicate (profile_version>=1, else a
+  // non-empty trimmed name) — no duplicated rules here.
+  return { ok: true, status: isProfileComplete(user) ? 'existing_profile' : 'bare_user', user };
 }
 
 // The connected Stream user, or throws only if the client itself is broken. Callers
@@ -81,18 +81,24 @@ function readStreamProfile(client) {
 // Build the upsert payload for an intentional profile save. The AUTHORITATIVE
 // `userId` is the ONLY source of `id` — `profileData.id` / `profileData.user_id`
 // are ignored, so no form-controlled field can override the authenticated identity.
-// Optional fields absent/empty are omitted (never null-wipe an existing value).
-// `profile_version: 1` is always stamped. `instructor` is NEVER written by this path.
+//
+// Field semantics MATCH the current production ProfileForm/handleProfileSave:
+//   - a PRESENT string value (including an intentional empty string "") is sent, so
+//     clearing an optional field the UI supports (bio, link) still works exactly as
+//     today (the legacy path sends `bio: profile.bio || ''`, `link: profile.link || ''`);
+//   - an ABSENT/undefined/null field is OMITTED, so it never unintentionally erases an
+//     existing value (the legacy path omits image via `image: profile.image || undefined`,
+//     and ProfileForm has no image input, so image is preserved).
+// `profile_version: 1` is always stamped. `id`/`user_id`/`instructor`/`role`/`token`
+// and any unapproved field are NEVER written by this path.
 function buildProfileUpsert(userId, profileData) {
   requireUserId(userId);
   const src = profileData || {};
   const out = { id: userId }; // authoritative id only; src.id / src.user_id ignored
   for (const f of ['name', 'color', 'image', 'bio', 'link']) {
-    if (src[f] !== undefined && src[f] !== null && src[f] !== '') out[f] = src[f];
+    // present (incl. an intentional "") -> include; undefined/null (absent) -> omit
+    if (src[f] !== undefined && src[f] !== null) out[f] = src[f];
   }
-  // Deliberately NO instructor: it is not authoritative here and is never transmitted
-  // by the verified-auth save path. Existing Stream instructor fields are left as-is
-  // (not deleted/cleared) for rollback compatibility.
   return markProfileVersion(out); // -> stamps profile_version: 1
 }
 

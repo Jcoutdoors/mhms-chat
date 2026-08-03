@@ -38,8 +38,10 @@ function validateInstructor(value) {
 function tokenResultToEvent(result) {
   const r = result || {};
   if (r.ok === true) {
-    const validToken = typeof r.token === 'string' && r.token !== '';
-    const validUserId = typeof r.userId === 'string' && r.userId !== '';
+    // Validate emptiness via trim (rejects whitespace-only), but CARRY the exact
+    // canonical values unchanged — never trim/normalize the canonical user_id.
+    const validToken = typeof r.token === 'string' && r.token.trim() !== '';
+    const validUserId = typeof r.userId === 'string' && r.userId.trim() !== '';
     if (validToken && validUserId) {
       return { event: EVENTS.SESSION_VALID, userId: r.userId, token: r.token, instructor: validateInstructor(r.instructor) };
     }

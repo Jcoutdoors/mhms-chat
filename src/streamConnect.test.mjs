@@ -47,9 +47,18 @@ test('connectVerified: bare user -> {ok:true, bare_user}', async () => {
   const r = await connectVerified(c, 'cats-new', 'tok');
   assert.equal(r.ok, true); assert.equal(r.status, 'bare_user');
 });
-test('connectVerified: version>=1 with no name still counts as existing_profile', async () => {
+// completeness classification comes from the SHARED isProfileComplete predicate
+test('connectVerified completeness uses shared predicate: version>=1 -> existing', async () => {
   const c = fakeClient({ 'cats-x': { id: 'cats-x', profile_version: 1 } });
   assert.equal((await connectVerified(c, 'cats-x', 'tok')).status, 'existing_profile');
+});
+test('connectVerified: trimmed non-empty legacy name -> existing; whitespace-only name -> bare', async () => {
+  const named = fakeClient({ 'cats-a': { id: 'cats-a', name: 'Alex Rivera' } });
+  assert.equal((await connectVerified(named, 'cats-a', 't')).status, 'existing_profile');
+  const ws = fakeClient({ 'cats-b': { id: 'cats-b', name: '   ' } });
+  assert.equal((await connectVerified(ws, 'cats-b', 't')).status, 'bare_user');
+  const none = fakeClient({ 'cats-c': { id: 'cats-c' } });
+  assert.equal((await connectVerified(none, 'cats-c', 't')).status, 'bare_user');
 });
 test('connectVerified: connection failure -> {ok:false, connect_failed} (NOT setup)', async () => {
   const c = fakeClient({}, { connectThrows: true });
@@ -90,11 +99,25 @@ test('buildProfileUpsert: missing/empty userId rejected', () => {
   assert.throws(() => buildProfileUpsert('', { name: 'A' }), /invalid_user_id/);
   assert.throws(() => buildProfileUpsert(undefined, { name: 'A' }), /invalid_user_id/);
 });
-test('buildProfileUpsert: profile_version:1 (numeric); empty optionals omitted', () => {
-  const p = buildProfileUpsert('cats-x', { name: 'A', color: '#123', bio: '', link: undefined, image: null });
+test('buildProfileUpsert: profile_version:1 numeric; clears present "" but omits absent fields', () => {
+  // Matches production: bio/link are clearable via "" (present), image is absent (undefined) -> preserved.
+  const p = buildProfileUpsert('cats-x', { name: 'A', color: '#123', bio: '', link: '' /* image, absent */ });
   assert.strictEqual(p.profile_version, 1);
   assert.equal(p.name, 'A'); assert.equal(p.color, '#123');
-  for (const f of ['bio', 'link', 'image']) assert.equal(f in p, false);
+  assert.strictEqual(p.bio, '');   // intentional clear -> sent as "" (clears existing)
+  assert.strictEqual(p.link, '');  // intentional clear -> sent as ""
+  assert.equal('image' in p, false); // absent -> omitted (existing image preserved)
+});
+test('buildProfileUpsert: undefined/null fields are omitted (never erase existing data)', () => {
+  const p = buildProfileUpsert('cats-x', { name: 'A', bio: undefined, link: null });
+  assert.equal('bio' in p, false);
+  assert.equal('link' in p, false);
+});
+test('buildProfileUpsert: prohibited fields excluded (id from arg only; no user_id/role/token/instructor)', () => {
+  const p = buildProfileUpsert('cats-AUTH', { id: 'cats-EVIL', user_id: 'cats-X', role: 'admin', token: 'zzz', instructor: true, name: 'A' });
+  assert.equal(p.id, 'cats-AUTH');
+  for (const bad of ['user_id', 'role', 'token', 'instructor']) assert.equal(bad in p, false, bad);
+  assert.deepEqual(Object.keys(p).sort(), ['id', 'name', 'profile_version']);
 });
 test('buildProfileUpsert: NO instructor key is ever produced (form or otherwise)', () => {
   const p = buildProfileUpsert('cats-x', { name: 'A', instructor: true });

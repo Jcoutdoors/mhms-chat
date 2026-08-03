@@ -1,21 +1,23 @@
-// legacyStorage tests (Phase 4B). Mocks globalThis.localStorage; deterministic.
+// legacyStorage tests (Phase 4B, final). Read-only, non-mutating. Deterministic.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  LEGACY_PROFILE_KEY, readLegacyUiHints, hasLegacyIdentity, clearLegacyIdentity,
-} from './legacyStorage.js';
+import { LEGACY_PROFILE_KEY, readLegacyUiHints, hasLegacyIdentity } from './legacyStorage.js';
 
-function mockStorage(initial) {
-  const m = new Map(Object.entries(initial || {}));
-  globalThis.localStorage = {
-    getItem: (k) => (m.has(k) ? m.get(k) : null),
-    setItem: (k, v) => m.set(k, String(v)),
-    removeItem: (k) => m.delete(k),
-    _map: m,
+// A recording storage mock. `writes` counts any setItem/removeItem attempts so we can
+// prove the Phase 4B helper NEVER writes. Getters can be made to throw a SecurityError.
+function makeStorage({ getThrows = false } = {}) {
+  const m = new Map();
+  const writes = [];
+  const store = {
+    _map: m, writes,
+    getItem(k) { if (getThrows) { const e = new Error('The operation is insecure.'); e.name = 'SecurityError'; throw e; } return m.has(k) ? m.get(k) : null; },
+    setItem(k, v) { writes.push(['set', k]); m.set(k, String(v)); },
+    removeItem(k) { writes.push(['remove', k]); m.delete(k); },
   };
-  return globalThis.localStorage;
+  globalThis.localStorage = store;
+  return store;
 }
-function seedProfile(obj) { return mockStorage({ [LEGACY_PROFILE_KEY]: JSON.stringify(obj) }); }
+function seed(obj) { const s = makeStorage(); s._map.set(LEGACY_PROFILE_KEY, JSON.stringify(obj)); return s; }
 test.afterEach(() => { delete globalThis.localStorage; });
 
 const LEGACY = {
@@ -23,77 +25,47 @@ const LEGACY = {
   firstName: 'Sam', lastName: 'Rivera', color: '#3b73d8', bio: 'hi', link: 'x.com', welcomed: true,
 };
 
-test('readLegacyUiHints NEVER returns id/email/instructor; only UI hints', () => {
-  seedProfile(LEGACY);
-  const hints = readLegacyUiHints();
-  assert.equal('id' in hints, false);
-  assert.equal('email' in hints, false);
-  assert.equal('instructor' in hints, false);
-  assert.deepEqual(hints, { color: '#3b73d8', firstName: 'Sam', lastName: 'Rivera', bio: 'hi', link: 'x.com' });
+test('readLegacyUiHints returns ONLY UI hints; never id/email/instructor', () => {
+  seed(LEGACY);
+  const h = readLegacyUiHints();
+  for (const k of ['id', 'email', 'instructor']) assert.equal(k in h, false, k);
+  assert.deepEqual(h, { color: '#3b73d8', firstName: 'Sam', lastName: 'Rivera', bio: 'hi', link: 'x.com' });
 });
 
-test('readLegacyUiHints returns {} when absent or malformed', () => {
-  mockStorage({});
-  assert.deepEqual(readLegacyUiHints(), {});
-  mockStorage({ [LEGACY_PROFILE_KEY]: '{not json' });
-  assert.deepEqual(readLegacyUiHints(), {});
+test('reads NEVER mutate storage; the full legacy blob is byte-for-byte unchanged', () => {
+  const s = seed(LEGACY);
+  const before = s._map.get(LEGACY_PROFILE_KEY);
+  readLegacyUiHints(); hasLegacyIdentity(); readLegacyUiHints();
+  assert.equal(s._map.get(LEGACY_PROFILE_KEY), before, 'stored blob unchanged');
+  assert.deepEqual(s.writes, [], 'no setItem/removeItem attempted'); // rollback data intact
 });
 
-test('hasLegacyIdentity reports id/email/instructor presence (informational only)', () => {
-  seedProfile(LEGACY);
+test('hasLegacyIdentity is informational (present vs absent), non-mutating', () => {
+  const s = seed(LEGACY);
   assert.equal(hasLegacyIdentity(), true);
-  seedProfile({ color: '#123' });
+  assert.deepEqual(s.writes, []);
+  seed({ color: '#123' });
   assert.equal(hasLegacyIdentity(), false);
 });
 
-test('clearLegacyIdentity strips id/email/instructor but PRESERVES ui hints (non-destructive)', () => {
-  const store = seedProfile(LEGACY);
-  const res = clearLegacyIdentity();
-  assert.equal(res.cleared, true);
-  const after = JSON.parse(store._map.get(LEGACY_PROFILE_KEY));
-  assert.equal('id' in after, false);
-  assert.equal('email' in after, false);
-  assert.equal('instructor' in after, false);
-  // UI-preference fields and the whole record are preserved (rollback-safe):
-  assert.equal(after.color, '#3b73d8');
-  assert.equal(after.firstName, 'Sam');
-  assert.equal(after.welcomed, true);
+test('absent / malformed record -> {} / false, no writes', () => {
+  const s = makeStorage();
+  assert.deepEqual(readLegacyUiHints(), {});
+  assert.equal(hasLegacyIdentity(), false);
+  s._map.set(LEGACY_PROFILE_KEY, '{not json');
+  assert.deepEqual(readLegacyUiHints(), {});
+  assert.deepEqual(s.writes, []);
 });
 
-test('clearLegacyIdentity is a no-op when nothing to strip / storage absent', () => {
-  seedProfile({ color: '#123' });
-  assert.equal(clearLegacyIdentity().cleared, false);
+test('SecurityError from getItem -> safe defaults; nothing propagates; no writes', () => {
+  const s = makeStorage({ getThrows: true });
+  assert.doesNotThrow(() => { assert.deepEqual(readLegacyUiHints(), {}); });
+  assert.doesNotThrow(() => { assert.equal(hasLegacyIdentity(), false); });
+  assert.deepEqual(s.writes, []);
+});
+
+test('unavailable localStorage -> safe defaults, no throw', () => {
   delete globalThis.localStorage;
-  assert.equal(clearLegacyIdentity().cleared, false); // no throw without localStorage
-  assert.deepEqual(readLegacyUiHints(), {});
-});
-
-// ---- storage that throws SecurityError (locked-down / private context) ----
-function throwingStorage({ getThrows = false, setThrows = false, removeThrows = false } = {}) {
-  globalThis.localStorage = {
-    getItem() { if (getThrows) throw new DOMException ? new Error('SecurityError') : new Error('SecurityError'); return JSON.stringify(LEGACY); },
-    setItem() { if (setThrows) throw new Error('SecurityError'); },
-    removeItem() { if (removeThrows) throw new Error('SecurityError'); },
-  };
-}
-
-test('SecurityError on getItem: read helpers return safe defaults, no throw', () => {
-  throwingStorage({ getThrows: true });
   assert.deepEqual(readLegacyUiHints(), {});
   assert.equal(hasLegacyIdentity(), false);
-  assert.equal(clearLegacyIdentity().cleared, false); // could not read -> nothing cleared
-});
-
-test('SecurityError on setItem: cleanup reports unsuccessful, no throw, nothing propagates', () => {
-  throwingStorage({ setThrows: true }); // getItem returns LEGACY (identity present), setItem throws
-  const res = clearLegacyIdentity();
-  assert.equal(res.cleared, false); // write failed -> reported unsuccessful, not thrown
-  // read helpers still safe:
-  assert.equal(hasLegacyIdentity(), true);
-});
-
-test('SecurityError never propagates to a simulated startup path', () => {
-  throwingStorage({ getThrows: true, setThrows: true });
-  // Simulate the boot sequence touching legacy storage; must not throw.
-  assert.doesNotThrow(() => { readLegacyUiHints(); hasLegacyIdentity(); clearLegacyIdentity(); });
 });

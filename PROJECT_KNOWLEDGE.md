@@ -1220,9 +1220,12 @@ modules rather than duplicating them):
   UI comes **only** from the `/token` claim (in memory); the verified-auth save path **never
   writes `instructor`** to Stream. Legacy Stream `instructor` fields may remain for rollback
   compatibility but are not authoritative and are not updated by this path.
-- `src/legacyStorage.js` — de-authorizes legacy `cats_profile`: exposes only non-authoritative UI
-  hints (never `id`/`email`/`instructor`), and lazily strips identity fields **non-destructively**
-  (rollback-safe).
+- `src/legacyStorage.js` — de-authorizes legacy `cats_profile`: **strictly read-only.** It exposes
+  only non-authoritative UI hints (never `id`/`email`/`instructor`) and an informational
+  presence check. The verified-auth path **ignores** the legacy identity fields but the **complete
+  `cats_profile` record is preserved unchanged** so a rollback to the current production bundle
+  (which may still require those legacy fields) stays functional; **cleanup of legacy identity data
+  is deferred until after the cutover is stable** (out of scope for Phase 4B).
 - `src/authComponents.jsx` — organization-driven onboarding UI (AuthLoading / EntryChoice /
   EmailVerification / VerificationCode / AuthServiceError / AuthGate) reading `orgConfig`; nothing
   hardcodes ATLAS/MHMS/CATS; assistant-disabled mode renders neutral org-branded copy.

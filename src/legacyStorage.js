@@ -8,18 +8,20 @@
 //   - profile DATA comes only from Stream
 //   - authentication comes only from the __Host session cookie
 //
-// This module centralizes that boundary: it exposes ONLY non-authoritative UI
-// hints from any legacy blob, never id/email/instructor, and provides a lazy,
-// non-destructive cleanup of the identity-bearing fields. It does not delete the
-// whole record (rollback compatibility): the pre-Phase-4B app may still read it.
+// This module is STRICTLY READ-ONLY. It exposes ONLY non-authoritative UI hints
+// from any legacy blob (never id/email/instructor) and an informational check of
+// whether legacy identity exists. It NEVER writes to localStorage — the complete
+// `cats_profile` record is left byte-for-byte unchanged so that a rollback to the
+// current production bundle (which may still require the legacy identity fields)
+// remains fully functional. Any actual cleanup is deferred until after the Phase 4
+// cutover is stable and is out of scope for Phase 4B.
 //
-// Pure-ish CommonJS: guarded localStorage access; no network, no React.
+// Pure-ish CommonJS: guarded (never-throwing) localStorage READS only; no writes,
+// no network, no React.
 
 'use strict';
 
 const LEGACY_PROFILE_KEY = 'cats_profile';
-// Fields that were identity/authorization-bearing and must be ignored post-4B.
-const NON_AUTHORITATIVE_STRIP = ['id', 'email', 'instructor'];
 
 function safeParse(raw) {
   try { return JSON.parse(raw || 'null'); } catch { return null; }
@@ -27,19 +29,16 @@ function safeParse(raw) {
 function getStore() {
   try { return typeof localStorage !== 'undefined' ? localStorage : null; } catch { return null; }
 }
-// Guarded accessors: a throwing getItem/setItem (e.g. SecurityError in a locked-down
-// or private context) must never propagate to application startup.
+// Guarded READ: a throwing getItem (e.g. SecurityError in a locked-down or private
+// context) must never propagate to application startup or logout.
 function safeGet(store, key) {
   try { return store ? store.getItem(key) : null; } catch { return null; }
 }
-function safeSet(store, key, value) {
-  try { if (store) store.setItem(key, value); return true; } catch { return false; }
-}
 
-// Read ONLY non-authoritative UI hints from a legacy blob (e.g. a previously
-// chosen avatar color) — NEVER id, email, or instructor. Returns {} if absent.
-// These hints may pre-fill the profile-setup form but never decide identity,
-// privilege, or new-vs-returning routing.
+// Read ONLY non-authoritative UI hints from a legacy blob (e.g. a previously chosen
+// avatar color or name parts) — NEVER id, email, or instructor. Returns {} if
+// absent/malformed/unreadable. These hints may pre-fill the profile-setup form but
+// never decide identity, privilege, or new-vs-returning routing. Does not mutate.
 function readLegacyUiHints() {
   const blob = safeParse(safeGet(getStore(), LEGACY_PROFILE_KEY));
   if (!blob || typeof blob !== 'object') return {};
@@ -52,34 +51,16 @@ function readLegacyUiHints() {
   return hints; // deliberately NO id / email / instructor
 }
 
-// True iff a legacy identity-bearing field is present (informational only).
+// Informational only: true iff a legacy identity-bearing field is present. Does not
+// mutate. Callers must NOT treat this as authority — it exists so diagnostics/UX can
+// note that pre-4B data exists; identity/instructor always come from /token.
 function hasLegacyIdentity() {
   const blob = safeParse(safeGet(getStore(), LEGACY_PROFILE_KEY));
   return !!(blob && typeof blob === 'object' && (blob.id || blob.email || 'instructor' in blob));
 }
 
-// Lazily strip the identity/authorization-bearing fields from the legacy blob,
-// preserving any non-authoritative UI hints. NON-destructive: keeps the record
-// (minus id/email/instructor) so nothing important is lost and rollback is safe.
-// Never throws.
-function clearLegacyIdentity() {
-  const store = getStore();
-  const blob = safeParse(safeGet(store, LEGACY_PROFILE_KEY));
-  if (!blob || typeof blob !== 'object') return { cleared: false };
-  let changed = false;
-  for (const f of NON_AUTHORITATIVE_STRIP) {
-    if (f in blob) { delete blob[f]; changed = true; }
-  }
-  // Non-destructive: only the identity fields are removed; the record (and its UI
-  // hints) is preserved. A failed write leaves storage untouched and reports safely.
-  if (changed) { const wrote = safeSet(store, LEGACY_PROFILE_KEY, JSON.stringify(blob)); return { cleared: wrote }; }
-  return { cleared: false };
-}
-
 module.exports = {
   LEGACY_PROFILE_KEY,
-  NON_AUTHORITATIVE_STRIP,
   readLegacyUiHints,
   hasLegacyIdentity,
-  clearLegacyIdentity,
 };
