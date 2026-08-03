@@ -1313,19 +1313,31 @@ identity/featured/notifications), webpack builds, and a local fetch-stub browser
 desktop + mobile) validated boot→entryChoice (no ProfileForm flash), New/Returning copy, email entry,
 request-code→code entry, the App-owned cooldown countdown, and the safe verify-failure path.
 
-**Functional validation still BLOCKED (needs Jonathan):** the controlled real-Stream **no-clobber
-proof** and the **connected browser-path validation** (valid-session restore, connected Stream, profile
-routing/save, instructor true/false, logout success/failure, session-expiry, channels/history/badges/
-threads/Welcome/Featured, listener cleanup) both require a live verified session — i.e. a short-lived
-verification code delivered to an inbox Jonathan controls. Until that coordination happens, Phase 4B2 is
-**Hold** for merge. Real Safari remains a Phase 4C device-matrix item.
+**Status (Approved with Notes; merged to `main`):** Phase 4B2 implementation and automated validation
+are **complete and approved**, including the **approved ATLAS host experience** (host-in-card, responsive
+mobile-centered → desktop side-by-side, final scale). PR #22 is merged; **production remains on the
+legacy root bundle** (not cut over).
 
-**Remaining after 4B2:** the blocked real-Stream proof + connected browser validation above, then
-**Phase 4C** (production bundle publish/cutover, Squarespace-iframe validation, rollback, live
-regression, device matrix incl. Safari, and the session-expiry runtime trigger). **Production is NOT
-cut over**, the **legacy token Worker remains live and unchanged**, the committed **root
-`chat.bundle.js` is still the production bundle** (the branch's rebuilt bundle is intentionally not
-published), peer-message `instructor` remains **legacy/client-writable debt**, Stream permissions are
+**Live validation deferred to Phase 4C (by the approved-origin boundary — working as designed):** the
+controlled real-Stream **no-clobber proof** and the **connected browser-path validation** (valid-session
+restore, connected Stream, profile routing/save, instructor true/false, logout success/failure,
+session-expiry, channels/history/badges/threads/Welcome/Featured, listener cleanup) require a live
+verified session, which the auth service will only grant to the real app served from the **approved
+origin `https://chat.mentalhealthmadesimple.life`** (exact server-side `Origin` check on every endpoint).
+That origin currently serves the legacy bundle, so these gates are **correctly deferred to the Phase 4C
+cutover** (they run immediately after publishing the new bundle to the approved origin). The
+approved-origin constraint must **not** be bypassed (no Origin spoofing, no temporary preview origin, no
+auth-service weakening). Real Safari is part of the same Phase 4C device matrix.
+
+**Rollback remains available at all times:** the prior production **root `chat.bundle.js` is unchanged
+and recoverable from git**, and the **legacy token Worker (`mhms-chat-token`) remains live and unchanged**
+— so a cutover can be reverted by restoring the prior root bundle (and the app continues to function on
+the legacy Worker). The branch's rebuilt bundle is intentionally **not** published.
+
+**Remaining after 4B2 → Phase 4C** (production bundle publish/cutover to the approved origin, then the
+deferred real-Stream proof + connected browser validation + Squarespace-iframe validation + device matrix
+incl. Safari + the session-expiry runtime trigger, then a stabilization window before any legacy-Worker
+retirement). Peer-message `instructor` remains **legacy/client-writable debt**, Stream permissions are
 **not server-enforced**, and **Phase 4C is not started.**
 
 ## QA SAFETY GUARDRAILS (required for all QA work)
