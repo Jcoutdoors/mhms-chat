@@ -98,14 +98,19 @@ the canonical Phase 1 module), `instructor.js` (server-derived instructor claim)
 `ratelimit.js`. Files in `functions/lib/` export no `onRequest` handler, so they are
 import-only modules, not routes.
 
-### Deploying / rolling back the instructor claim (Phase 4A2)
-- **Provision:** set `INSTRUCTOR_EMAILS` on the `collier-auth-proof` Pages project (e.g.
-  `wrangler pages secret put INSTRUCTOR_EMAILS`, or a plaintext variable in the dashboard),
-  value = the comma-separated instructor emails; then deploy `auth/pages`. No other secret
-  changes. Rotate by editing the value and redeploying.
-- **Rollback:** redeploy the previous auth Pages version (or unset `INSTRUCTOR_EMAILS` →
-  the claim fails closed to `false`). Rollback does not touch the chat app, the legacy token
-  Worker, Stream, or any other secret.
+### Deploying / rolling back the instructor claim (Phase 4A2) — DEPLOYED 2026-08-03
+- **Live:** deployment `a2c173eb-2766-40f4-af6c-e2bb745e6ba5` on `collier-auth-proof`
+  (`auth.mentalhealthmadesimple.life`), with `INSTRUCTOR_EMAILS` provisioned as a **Cloudflare
+  secret** (production; value never committed). Production-validated: instructor→`instructor:true`,
+  non-instructor→`instructor:false`; token/user_id/CORS/no-store unchanged.
+- **Provision (for reference / re-provision):** set `INSTRUCTOR_EMAILS` on the `collier-auth-proof`
+  Pages project (`wrangler pages secret put INSTRUCTOR_EMAILS`), value = the comma-separated
+  instructor emails; then deploy `auth/pages`. No other secret changes. Rotate by editing the
+  value and redeploying.
+- **Rollback:** redeploy the previous auth Pages version `39abd85d-9e18-493f-9386-5fa9a53c4911`
+  (or unset `INSTRUCTOR_EMAILS` → the claim fails closed to `false`). The `INSTRUCTOR_EMAILS`
+  secret may be retained (the previous version ignores it). Rollback does not touch the chat app,
+  the legacy token Worker, Stream, or any other secret.
 
 ### Session
 Compact HMAC-SHA256 (JWT-shaped) token; claims `sub`/`iat`/`exp`(=iat+30d)/`ver`.
