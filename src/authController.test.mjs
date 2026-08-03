@@ -28,12 +28,13 @@ function mk(over = {}) {
   const snaps = [];
   const ctrl = createAuthController({
     authClient,
-    makeStreamClient: () => client,
+    makeStreamClient: over.makeStreamClientImpl || (() => client),
     connect: over.connectImpl || (async (cl, userId, token) => { calls.connect.push({ userId, token }); return next(q.connect); }),
     disconnect: over.disconnectImpl || (async () => { calls.disconnect++; }),
     save: over.saveImpl || (async (cl, userId, data) => { calls.save.push({ userId, data }); return over.savePayload || { id: userId, ...data }; }),
     readProfile: over.readProfile || ((cl) => over.readProfileValue),
-    setupChannels: over.setupImpl || (async (cl, userId) => { calls.setup.push(userId); }),
+    // Generation-aware setup contract: setupChannels({ client, userId, user, isCurrent }).
+    setupChannels: over.setupImpl || (async ({ userId }) => { calls.setup.push(userId); }),
     onChange: (s) => snaps.push(s),
     now: over.now || (() => 1000),
   });
@@ -161,22 +162,38 @@ test('logout success: disconnect + clear + entryChoice; sensitive state cleared'
   const s = ctrl.getState();
   assert.equal(s.userId, null); assert.equal(s.instructor, false); assert.equal(s.user, null);
 });
-test('logout SERVER FAILURE -> signOutError (not entryChoice); Stream still disconnected', async () => {
-  const { ctrl, calls } = mk({ logout: [{ ok: false }] });
+test('logout SERVER FAILURE -> signOutError; ALL sensitive state cleared regardless of result', async () => {
+  // instructor:true so we prove instructor is reset even when the server logout fails.
+  const { ctrl, calls } = mk({
+    token: [{ ok: true, token: 'tok', userId: 'cats-x', name: 'A', instructor: true }],
+    connect: [{ ok: true, status: 'existing_profile', user: { id: 'cats-x', name: 'A' } }],
+    logout: [{ ok: false }],
+  });
   await ctrl.boot();
+  assert.equal(ctrl.getState().instructor, true); // authenticated as instructor first
   await ctrl.logout();
+  const s = ctrl.getState();
   assert.equal(ctrl.getPhase(), S.SIGN_OUT_ERROR);      // does NOT claim signed out
   assert.notEqual(ctrl.getPhase(), S.ENTRY_CHOICE);
   assert.ok(calls.disconnect >= 1);                     // Stream disconnected even on failure
   assert.equal(ctrl._clientRef.current, null);
-  assert.equal(ctrl.getState().user, null);             // chat state cleared
+  assert.equal(s.user, null);                           // no user / profile
+  assert.equal(s.userId, null);                         // no userId
+  assert.equal(s.instructor, false);                    // instructor reset to false
+  assert.equal(s.cooldownDeadline, null);               // cooldown reset (clearSensitive runs unconditionally)
+  assert.equal(JSON.stringify(s).includes('cats-x'), false); // no identity/profile anywhere in snapshot
+  assert.equal(s.error && s.error.error, 'signout_failed');   // only safe error state
 });
-test('logout retry from signOutError re-attempts /logout -> entryChoice on success', async () => {
+test('logout retry from signOutError succeeds WITHOUT any retained identity data', async () => {
   const { ctrl } = mk({ logout: [{ ok: false }, { ok: true }] });
   await ctrl.boot(); await ctrl.logout();
   assert.equal(ctrl.getPhase(), S.SIGN_OUT_ERROR);
+  // Everything was already cleared at logout start; retry must not depend on it.
+  assert.equal(ctrl.getState().userId, null);
+  assert.equal(ctrl.getState().user, null);
   await ctrl.retry();
-  assert.equal(ctrl.getPhase(), S.ENTRY_CHOICE);
+  assert.equal(ctrl.getPhase(), S.ENTRY_CHOICE);        // server logout retried and succeeded
+  assert.equal(ctrl.getState().userId, null);
 });
 test('logout clears clientRef even when disconnect throws', async () => {
   const { ctrl } = mk({ disconnectImpl: async () => { throw new Error('disconnect boom'); } });
@@ -201,6 +218,75 @@ test('stale completion after logout cannot reconnect (generation guard)', async 
   d.resolve({ ok: true, token: 't', userId: 'cats-x', instructor: true }); // late success
   await verifyP;
   assert.equal(ctrl.getPhase(), S.ENTRY_CHOICE); // NOT community; stale result ignored
+});
+
+// ---- lifecycle: stale-after-connect / stale-during-setup / healthy replacement ----
+test('stale immediately after connect resolves: client disconnected, no setup, clientRef null', async () => {
+  // connect is pending; logout advances the generation; then connect resolves ok.
+  const d = deferred();
+  const created = [];
+  let n = 0;
+  const { ctrl, calls } = mk({
+    makeStreamClientImpl: () => { const c = { __n: ++n }; created.push(c); return c; },
+    connectImpl: async (cl, userId, token) => { calls.connect.push({ userId, token }); return d.p; },
+  });
+  const bootP = ctrl.boot();
+  await new Promise((r) => setImmediate(r)); // park at the pending connect
+  assert.equal(ctrl.getPhase(), S.LOADING_PROFILE);
+  assert.equal(ctrl._clientRef.current, null);          // not assigned until connect resolves current
+  await ctrl.logout();                                   // gen++ -> pending connect is now stale
+  assert.equal(ctrl.getPhase(), S.ENTRY_CHOICE);
+  d.resolve({ ok: true, status: 'existing_profile', user: { id: 'cats-x', name: 'A' } }); // late success
+  await bootP;
+  assert.equal(created.length, 1);                       // exactly one client was created
+  assert.equal(ctrl._clientRef.current, null);           // stale success never assigns clientRef
+  assert.equal(calls.setup.length, 0);                   // setupChannels never invoked
+  assert.ok(calls.disconnect >= 1);                      // the created client was disconnected
+  assert.equal(ctrl.getState().user, null);
+  assert.equal(ctrl.getPhase(), S.ENTRY_CHOICE);         // NOT loadingProfile/community/profileSetup
+});
+
+test('stale while setupChannels pending: isCurrent() flips false; no commit; client disconnected; clientRef null', async () => {
+  const d = deferred();
+  let sawCurrentAtStart = null;
+  let currentAtResolve = null;
+  const { ctrl } = mk({
+    setupImpl: async ({ isCurrent }) => {
+      sawCurrentAtStart = isCurrent();
+      await d.p;
+      currentAtResolve = isCurrent();
+      // A conformant App setup would stop here and NOT mutate App state / register listeners.
+    },
+  });
+  const bootP = ctrl.boot();
+  await new Promise((r) => setImmediate(r)); // park inside the pending setupChannels
+  assert.equal(sawCurrentAtStart, true);                 // current while the op is live
+  assert.equal(ctrl.getPhase(), S.LOADING_PROFILE);      // PROFILE_COMPLETE not applied yet
+  await ctrl.logout();                                   // gen++ -> setup becomes stale
+  assert.equal(ctrl.getPhase(), S.ENTRY_CHOICE);
+  d.resolve();
+  await bootP;
+  assert.equal(currentAtResolve, false);                 // predicate correctly reports stale
+  assert.equal(ctrl._clientRef.current, null);           // client cleared, not left connected
+  assert.equal(ctrl.getState().user, null);              // authenticated state not restored
+  assert.equal(ctrl.getPhase(), S.ENTRY_CHOICE);         // stayed logged out (no PROFILE_COMPLETE)
+});
+
+test('healthy-client replacement: old client torn down BEFORE new connect; no duplicate live clients', async () => {
+  const events = [];
+  let n = 0;
+  const { ctrl } = mk({
+    makeStreamClientImpl: () => ({ __n: ++n }),
+    connectImpl: async (cl) => { events.push(`connect:${cl.__n}`); return { ok: true, status: 'existing_profile', user: { id: 'cats-x', name: 'A' } }; },
+    disconnectImpl: async (cl) => { events.push(`disconnect:${cl ? cl.__n : 'none'}`); },
+  });
+  await ctrl.boot();                                     // connect client #1 -> community
+  assert.equal(ctrl.getPhase(), S.COMMUNITY);
+  assert.equal(ctrl._clientRef.current.__n, 1);
+  await ctrl.boot();                                     // a second connect op over the live client
+  assert.equal(ctrl._clientRef.current.__n, 2);          // new live client is #2
+  // Observable call ORDER: #1 connected, then #1 disconnected before #2 connects.
+  assert.deepEqual(events, ['connect:1', 'disconnect:1', 'connect:2']);
 });
 
 // ---- cooldown ----

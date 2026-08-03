@@ -25,10 +25,25 @@
 // start and aborts (without applying results) if gen changed — so late completions
 // after logout are no-ops (belt-and-suspenders with the machine's signingOut no-op).
 //
-// TRUTHFUL LOGOUT: disconnect + clear chat state FIRST, then POST /logout. On
-// success -> entryChoice (all sensitive state cleared). On failure -> signOutError
-// (Stream stays disconnected, chat state stays cleared, but we do NOT claim the
-// server session ended); Retry re-attempts. localStorage is never a logout tombstone.
+// TRUTHFUL LOGOUT: when logout BEGINS we disconnect Stream through the guarded
+// lifecycle and clear ALL local authenticated + profile state immediately
+// (clearSensitive) — regardless of the server result. Then POST /logout: success ->
+// entryChoice; failure -> signOutError, which holds only safe error/retry state.
+// A failed logout does NOT claim the cookie-backed session ended (a refresh may
+// restore a still-valid server session), and we never locally restore the previous
+// user. Retry needs no retained identity. localStorage is never a logout tombstone.
+//
+// SETUP CHANNELS CONTRACT (generation-aware): setupChannels is invoked as
+//   setupChannels({ client, userId, user, isCurrent })
+// where isCurrent() returns true only while THIS operation's generation is current
+// (no logout / newer op has superseded it). The App-side implementation (Commit 2)
+// MUST consult isCurrent(): before network stages, after each awaited stage, before
+// every App-state mutation (currentUser, channels, messages, unread, threads,
+// Featured Updates), before registering listeners/watchers, and before setting the
+// active channel; and it MUST dispose any listener/unsubscribe handles it allocated
+// if it becomes stale. The controller ALSO re-checks staleness after setupChannels
+// resolves and disconnects + clears clientRef on a stale completion — it does not
+// rely on that post-check alone.
 
 'use strict';
 
@@ -81,6 +96,18 @@ function createAuthController(deps) {
     if (!c) return;
     try { await disconnect(c); } catch { /* best-effort */ } finally { clientRef.current = null; }
   }
+  // Clear ALL local authenticated + profile state. Used at logout start so nothing
+  // sensitive survives, regardless of the server /logout result.
+  function clearSensitive() {
+    st.user = null;
+    st.userId = null;
+    st.instructor = false;
+    st.cooldownDeadline = null;
+    st.entryPath = null;
+    st.error = null;
+    email = '';
+    streamUser = null;
+  }
 
   // token is a LOCAL parameter only; never stored on `st`.
   async function connectAndRoute(g, userId, token, instructor) {
@@ -104,8 +131,9 @@ function createAuthController(deps) {
     streamUser = res.user;
     st.user = buildUser(streamUser);
     if (connectResultToEvent(res).event === EVENTS.PROFILE_COMPLETE) {
-      try { await setupChannels(client, userId); } catch { await teardownClient(); apply(EVENTS.PROFILE_LOAD_ERROR); emit(); return; }
-      if (stale(g)) { await teardownClient(); return; }
+      try { await setupChannels({ client, userId, user: st.user, isCurrent: () => g === gen }); }
+      catch { await teardownClient(); apply(EVENTS.PROFILE_LOAD_ERROR); emit(); return; }
+      if (stale(g)) { await teardownClient(); return; } // belt-and-suspenders; App also honors isCurrent()
       apply(EVENTS.PROFILE_COMPLETE);       // -> community
     } else {
       apply(EVENTS.PROFILE_INCOMPLETE);     // -> profileSetup
@@ -185,7 +213,7 @@ function createAuthController(deps) {
         const after = (readProfile ? readProfile(client) : null) || Object.assign({}, streamUser || {}, payload);
         streamUser = after;
         st.user = buildUser(after);
-        await setupChannels(client, st.userId);
+        await setupChannels({ client, userId: st.userId, user: st.user, isCurrent: () => g === gen });
         if (stale(g)) return;
         apply(EVENTS.SAVE_OK); emit();
       } catch {
@@ -197,32 +225,34 @@ function createAuthController(deps) {
 
     editProfile() { apply(EVENTS.EDIT_PROFILE); emit(); },
 
-    // Truthful logout. Disconnect + clear FIRST, then POST /logout; success ->
-    // entryChoice, failure -> signOutError (do not claim the session ended).
+    // Truthful logout. Disconnect through the guarded lifecycle and clear ALL local
+    // authenticated + profile state immediately (clearSensitive) — regardless of the
+    // server result. Then POST /logout; success -> entryChoice, failure ->
+    // signOutError holding only safe error/retry state (do NOT claim the cookie-backed
+    // session ended; a refresh may restore a still-valid server session).
     async logout() {
       gen += 1; // invalidate any in-flight async
       const client = clientRef.current;
       try { await disconnect(client); } catch { /* best-effort; still clear */ } finally { clientRef.current = null; }
-      st.user = null; // clear rendered chat/profile immediately
-      apply(EVENTS.LOGOUT); emit(); // community -> signingOut
+      clearSensitive(); // user, userId, instructor, streamUser, email, cooldown, entryPath, error
+      apply(EVENTS.LOGOUT); emit(); // authenticated state -> signingOut
       let r; try { r = await authClient.logout(); } catch { r = { ok: false }; }
       if (r && r.ok) {
-        st.userId = null; st.instructor = false; st.error = null; st.cooldownDeadline = null;
-        email = ''; streamUser = null;
-        apply(EVENTS.LOGOUT_OK); // -> entryChoice
+        apply(EVENTS.LOGOUT_OK); // -> entryChoice (state already cleared)
       } else {
-        st.error = { error: 'signout_failed' };
-        apply(EVENTS.LOGOUT_FAILED); // -> signOutError (server session may still be valid)
+        st.error = { error: 'signout_failed' }; // safe error/retry state only
+        apply(EVENTS.LOGOUT_FAILED); // -> signOutError (cookie-backed session may still be valid)
       }
       emit();
     },
 
-    // Retry: from signOutError re-attempt /logout; from serviceError re-run boot.
+    // Retry: from signOutError re-attempt /logout (no retained identity needed — state
+    // was already cleared at logout start); from serviceError re-run boot.
     async retry() {
       if (st.phase === 'signOutError') {
         apply(EVENTS.RETRY); emit(); // -> signingOut
         let r; try { r = await authClient.logout(); } catch { r = { ok: false }; }
-        if (r && r.ok) { st.userId = null; st.instructor = false; st.error = null; st.cooldownDeadline = null; email = ''; streamUser = null; apply(EVENTS.LOGOUT_OK); }
+        if (r && r.ok) { st.error = null; apply(EVENTS.LOGOUT_OK); } // -> entryChoice
         else { st.error = { error: 'signout_failed' }; apply(EVENTS.LOGOUT_FAILED); }
         emit();
         return;

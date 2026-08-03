@@ -10,17 +10,24 @@
 // LOGOUT (a Phase 4B responsibility). This boundary is intentional.
 //
 // GLOBAL SAFETY EVENTS + PRECEDENCE:
-//   - LOGOUT is accepted from EVERY state except `booting` and always returns
-//     `entryChoice`.
-//   - SESSION_EXPIRED is accepted from every state where a verified/authenticated
-//     session may exist (authenticating, loadingProfile, profileSetup,
-//     savingProfile, community) and returns `sessionExpired`.
+//   - LOGOUT is accepted from the authenticated states (authenticating,
+//     loadingProfile, profileSetup, savingProfile, community) and enters the
+//     transient `signingOut` state. The async logout then dispatches:
+//       * LOGOUT_OK     (server /logout succeeded) -> `entryChoice`
+//       * LOGOUT_FAILED (server /logout failed)    -> `signOutError`
+//     From `signOutError`, RETRY re-attempts the server logout (-> `signingOut`).
+//     A failed logout NEVER claims the cookie-backed session ended — the caller
+//     keeps Stream locally disconnected and may note that a refresh could restore a
+//     still-valid server session. From non-authenticated states LOGOUT is a no-op.
+//   - SESSION_EXPIRED is accepted from the same authenticated states and returns
+//     `sessionExpired`.
 //   Global safety events are evaluated BEFORE the per-state table: a state can
 //   neither override nor suppress LOGOUT/SESSION_EXPIRED. This guarantees that a
 //   logout (or expiry) issued during any transient state — verifying,
 //   authenticating, savingProfile — cannot be "outrun" by a late async success
-//   event, because after LOGOUT the machine is in `entryChoice`, from which
-//   stale success events (VERIFY_OK/TOKEN_OK/SAVE_OK/PROFILE_COMPLETE) are no-ops.
+//   event: after LOGOUT the machine is in `signingOut` (then `entryChoice` or
+//   `signOutError`), and from all three, stale success events
+//   (VERIFY_OK/TOKEN_OK/SAVE_OK/PROFILE_COMPLETE) are no-ops.
 //
 // Invalid transitions are explicit and non-throwing: an event not valid for the
 // current state leaves the state unchanged and reports changed:false.
