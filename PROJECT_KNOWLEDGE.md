@@ -1293,20 +1293,40 @@ so the flow never reverts to a bare utility form. Assistant-disabled removes the
 tests: a responsive `@media (min-width:640px)` branch with `flex-direction: row`, the character rendered
 inside the card, and no hardcoded ATLAS/MHMS/CATS in the reusable components.
 
-**Verification (4B2):** all suites green (controller/cooldown/listenerBag/auth-service/identity/
-featured/notifications), webpack builds, and a local fetch-stub browser harness (Chromium desktop +
-mobile viewport) validated boot→entryChoice (no ProfileForm flash), New/Returning copy, email entry,
-request-code→code entry, the App-owned cooldown countdown, and the safe verify-failure path. **Not
-yet done and required before merge:** the controlled real-Stream **no-clobber proof** on an
-accessible verified identity, and a full browser matrix (real Safari; the connected happy path,
-profile save, logout, Welcome/Welcome Back, and chat shell — the harness deliberately stays in the
-no-session path and does not touch Stream).
+**Functional corrections (4B2 closeout):**
+- **Session expiry:** the controller has an explicit `sessionExpired()` (mid-session; makes NO server
+  call — the session is already gone) that advances the generation, disconnects Stream, and clears ALL
+  local authenticated/profile state (no `localStorage` restoration) before the truthful `sessionExpired`
+  screen. `retry()` from `sessionExpired` returns to the verified sign-in flow (`entryChoice`) only — it
+  never reconnects or reuses a prior identity; stale async cannot reconnect (generation guard). Accepted
+  only from an authenticated state (a no-op elsewhere). Unit-tested. NOTE: the runtime *trigger* that
+  decides when to declare a live session expired from Stream signals is intentionally **not** wired in
+  4B2 (a speculative trigger could false-positive-kick users on a transient drop); it is deferred to the
+  Phase 4C connected-path validation + hardening.
+- **Legacy profile-hint boundary** (`src/profileForm.js`, tested): legacy `cats_profile` hints pre-fill
+  ONLY a genuinely bare/first-time profile (no authoritative Stream name). Editing an EXISTING Stream
+  profile uses Stream values only — no legacy name/bio/link/color/image fallback; absent Stream fields
+  stay empty/default — so a save can never resurrect stale local values.
 
-**Remaining after 4B2:** the real-Stream proof + browser matrix above, then **Phase 4C** (production
-bundle publish/cutover, Squarespace-iframe validation, rollback, live regression). **Production is
-NOT cut over**, the **legacy token Worker remains live and unchanged**, the committed **root
+**Verification (4B2):** all suites green (controller/cooldown/listenerBag/profileForm/auth-service/
+identity/featured/notifications), webpack builds, and a local fetch-stub browser harness (Chromium
+desktop + mobile) validated boot→entryChoice (no ProfileForm flash), New/Returning copy, email entry,
+request-code→code entry, the App-owned cooldown countdown, and the safe verify-failure path.
+
+**Functional validation still BLOCKED (needs Jonathan):** the controlled real-Stream **no-clobber
+proof** and the **connected browser-path validation** (valid-session restore, connected Stream, profile
+routing/save, instructor true/false, logout success/failure, session-expiry, channels/history/badges/
+threads/Welcome/Featured, listener cleanup) both require a live verified session — i.e. a short-lived
+verification code delivered to an inbox Jonathan controls. Until that coordination happens, Phase 4B2 is
+**Hold** for merge. Real Safari remains a Phase 4C device-matrix item.
+
+**Remaining after 4B2:** the blocked real-Stream proof + connected browser validation above, then
+**Phase 4C** (production bundle publish/cutover, Squarespace-iframe validation, rollback, live
+regression, device matrix incl. Safari, and the session-expiry runtime trigger). **Production is NOT
+cut over**, the **legacy token Worker remains live and unchanged**, the committed **root
 `chat.bundle.js` is still the production bundle** (the branch's rebuilt bundle is intentionally not
-published), and **Phase 4C is not started.**
+published), peer-message `instructor` remains **legacy/client-writable debt**, Stream permissions are
+**not server-enforced**, and **Phase 4C is not started.**
 
 ## QA SAFETY GUARDRAILS (required for all QA work)
 

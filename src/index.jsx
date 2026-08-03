@@ -55,6 +55,7 @@ import { createListenerBag } from './listenerBag';
 import { AuthGate, AuthLoading, SignOutError } from './authComponents';
 import { MHMS_ORG_CONFIG } from './orgConfig';
 import { readLegacyUiHints } from './legacyStorage';
+import { profileFormInitial } from './profileForm';
 
 // Load emoji-mart from CDN at runtime
 let emojiMartPromise = null;
@@ -1211,26 +1212,9 @@ function markSeenWelcome(userId) {
   } catch { /* UI pref only; ignore */ }
 }
 
-// Split a Stream display name back into first/last for prefilling the edit form.
-function splitName(name) {
-  const parts = String(name || '').trim().split(/\s+/);
-  return { firstName: parts[0] || '', lastName: parts.slice(1).join(' ') || '' };
-}
-// Build ProfileForm initial values from the authoritative Stream profile (auth.user),
-// falling back to legacy UI hints for a brand-new (bare) user. No email field.
-function profileFormInitial(user) {
-  const u = user || {};
-  const hints = readLegacyUiHints() || {};
-  const named = splitName(u.name);
-  return {
-    firstName: named.firstName || hints.firstName || '',
-    lastName: named.lastName || hints.lastName || '',
-    bio: u.bio != null ? u.bio : (hints.bio || ''),
-    link: u.link != null ? u.link : (hints.link || ''),
-    color: u.color || hints.color || undefined,
-    image: u.image,
-  };
-}
+// ProfileForm initial values now come from ./profileForm (pure, tested). Legacy cats_profile
+// hints pre-fill ONLY a bare first-time profile; an existing Stream profile uses Stream
+// values only (see profileForm.js). Callers pass readLegacyUiHints() as the hints source.
 
 // Custom thread header with a clear, pronounced close control (Stream's default
 // close button is faint and hard to find, on mobile and desktop). closeThread is
@@ -2822,7 +2806,7 @@ function App() {
     const editingExisting = !!(auth.user && auth.user.name); // has a Stream profile already
     return (
       <ProfileForm
-        initial={profileFormInitial(auth.user)}
+        initial={profileFormInitial(auth.user, editingExisting ? null : readLegacyUiHints())}
         onSave={handleProfileSave}
         title={editingExisting ? 'Edit Your Profile' : 'Welcome to CATS Program'}
         subtitle={editingExisting ? 'Update your info anytime' : 'Set up your profile to get started'}

@@ -289,6 +289,62 @@ test('healthy-client replacement: old client torn down BEFORE new connect; no du
   assert.deepEqual(events, ['connect:1', 'disconnect:1', 'connect:2']);
 });
 
+// ---- session expiry (mid-session) ----
+test('sessionExpired clears all state, disconnects, and shows the sessionExpired screen', async () => {
+  const { ctrl, calls } = mk({ token: [{ ok: true, token: 'tok', userId: 'cats-x', name: 'A', instructor: true }] });
+  await ctrl.boot();
+  assert.equal(ctrl.getPhase(), S.COMMUNITY);
+  await ctrl.sessionExpired();
+  const s = ctrl.getState();
+  assert.equal(ctrl.getPhase(), S.SESSION_EXPIRED);   // no blank screen; explicit state
+  assert.ok(calls.disconnect >= 1);                    // Stream disconnected
+  assert.equal(ctrl._clientRef.current, null);         // client cleared
+  assert.equal(s.user, null);
+  assert.equal(s.userId, null);
+  assert.equal(s.instructor, false);
+  assert.equal(JSON.stringify(s).includes('cats-x'), false); // no identity retained
+});
+test('sessionExpired makes NO server call (session already gone)', async () => {
+  const { ctrl, calls } = mk();
+  await ctrl.boot();
+  await ctrl.sessionExpired();
+  assert.equal(calls.logout, 0, 'no /logout call on expiry');
+});
+test('retry from sessionExpired returns to the verified sign-in flow WITHOUT reconnecting', async () => {
+  const { ctrl, calls } = mk();
+  await ctrl.boot();
+  const tokenCallsBefore = calls.getToken;
+  await ctrl.sessionExpired();
+  await ctrl.retry();
+  assert.equal(ctrl.getPhase(), S.ENTRY_CHOICE);       // approved unauthenticated flow
+  assert.equal(ctrl._clientRef.current, null);          // no reconnect
+  assert.equal(calls.getToken, tokenCallsBefore, 'retry does not silently re-auth/reconnect');
+  assert.equal(ctrl.getState().userId, null);
+});
+test('stale async after sessionExpired cannot reconnect (generation guard)', async () => {
+  const d = deferred();
+  let n = 0;
+  const { ctrl } = mk({ getTokenImpl: () => { n += 1; return n === 1 ? Promise.resolve(BOOT_401) : d.p; } });
+  await ctrl.boot();               // 401 -> entryChoice
+  await toCode(ctrl, 'new');
+  const verifyP = ctrl.submitCode('123456'); // -> authenticating, getToken hangs
+  await new Promise((r) => setImmediate(r));
+  assert.equal(ctrl.getPhase(), S.AUTHENTICATING);
+  await ctrl.sessionExpired();      // gen++ ; from authenticating -> sessionExpired
+  assert.equal(ctrl.getPhase(), S.SESSION_EXPIRED);
+  d.resolve({ ok: true, token: 't', userId: 'cats-x', instructor: true }); // late success
+  await verifyP;
+  assert.equal(ctrl.getPhase(), S.SESSION_EXPIRED);     // NOT community; stale result ignored
+  assert.equal(ctrl._clientRef.current, null);
+});
+test('sessionExpired is a no-op from a non-authenticated state (e.g. entryChoice)', async () => {
+  const { ctrl } = mk({ token: [BOOT_401] });
+  await ctrl.boot();
+  assert.equal(ctrl.getPhase(), S.ENTRY_CHOICE);
+  await ctrl.sessionExpired();
+  assert.equal(ctrl.getPhase(), S.ENTRY_CHOICE, 'expiry from entryChoice does not change state');
+});
+
 // ---- cooldown ----
 test('cooldown deadline set on request success and on rate-limit; reset on logout', async () => {
   let t = 1000; const { ctrl } = mk({ now: () => t, token: [{ ok: false, status: 401, error: 'session_required' }], request: [{ ok: true }] });

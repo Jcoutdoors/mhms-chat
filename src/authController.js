@@ -225,6 +225,19 @@ function createAuthController(deps) {
 
     editProfile() { apply(EVENTS.EDIT_PROFILE); emit(); },
 
+    // Session expiry (mid-session): the cookie-backed session is already gone, so there is
+    // NO server call. Like logout, we advance the generation (so in-flight work cannot
+    // reconnect), disconnect Stream, and clear ALL local authenticated + profile state
+    // (no localStorage is touched, so nothing stale is restored), then show the truthful
+    // sessionExpired screen. Accepted only from an authenticated state; a no-op elsewhere.
+    async sessionExpired() {
+      gen += 1;
+      try { await disconnect(clientRef.current); } catch { /* best-effort; still clear */ } finally { clientRef.current = null; }
+      clearSensitive();
+      apply(EVENTS.SESSION_EXPIRED); // authenticated state -> sessionExpired (global, no-op otherwise)
+      emit();
+    },
+
     // Truthful logout. Disconnect through the guarded lifecycle and clear ALL local
     // authenticated + profile state immediately (clearSensitive) — regardless of the
     // server result. Then POST /logout; success -> entryChoice, failure ->
@@ -246,8 +259,11 @@ function createAuthController(deps) {
       emit();
     },
 
-    // Retry: from signOutError re-attempt /logout (no retained identity needed — state
-    // was already cleared at logout start); from serviceError re-run boot.
+    // Retry:
+    //  - signOutError -> re-attempt /logout (no retained identity needed).
+    //  - sessionExpired -> return to the verified sign-in flow (entryChoice) ONLY; do not
+    //    reconnect or reuse any prior identity (state is already cleared).
+    //  - serviceError -> re-run boot (re-check the session).
     async retry() {
       if (st.phase === 'signOutError') {
         apply(EVENTS.RETRY); emit(); // -> signingOut
@@ -255,6 +271,10 @@ function createAuthController(deps) {
         if (r && r.ok) { st.error = null; apply(EVENTS.LOGOUT_OK); } // -> entryChoice
         else { st.error = { error: 'signout_failed' }; apply(EVENTS.LOGOUT_FAILED); }
         emit();
+        return;
+      }
+      if (st.phase === 'sessionExpired') {
+        apply(EVENTS.RETRY); emit(); // -> entryChoice (verified sign-in path; no reconnect)
         return;
       }
       apply(EVENTS.RETRY); emit(); // serviceError -> checkingSession
