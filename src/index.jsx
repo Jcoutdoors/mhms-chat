@@ -52,7 +52,7 @@ import { getToken, requestCode, verifyCode, logout as authLogout } from './authC
 import { connectVerified, disconnectVerified, saveProfile as streamSaveProfile, readStreamProfile } from './streamConnect';
 import { remainingSeconds } from './cooldown';
 import { createListenerBag } from './listenerBag';
-import { AuthGate, AuthLoading } from './authComponents';
+import { AuthGate, AuthLoading, SignOutError } from './authComponents';
 import { MHMS_ORG_CONFIG } from './orgConfig';
 import { readLegacyUiHints } from './legacyStorage';
 
@@ -392,26 +392,9 @@ function ProfileForm({ initial = {}, onSave, title, subtitle, showIntro = false,
   );
 }
 
-// VIF Phase 4B2: truthful sign-out-error state (decision 5). The server /logout failed,
-// so we do NOT claim the account is signed out — chat is locally disconnected and cleared,
-// and Retry re-attempts the server logout. We also note a refresh may restore a still-valid
-// session (the cookie may not have been revoked).
-function SignOutError({ onRetry, busy = false }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#fff', fontFamily: "'DM Sans', sans-serif", padding: 24 }}>
-      <div style={{ maxWidth: 380, textAlign: 'center' }}>
-        <div style={{ fontSize: 34, marginBottom: 12 }}>⚠️</div>
-        <div style={{ fontSize: 17, fontWeight: 700, color: '#1a1a1a', marginBottom: 10 }}>We couldn't finish signing you out</div>
-        <div style={{ fontSize: 13.5, color: '#555', lineHeight: 1.6, marginBottom: 20 }}>
-          You've been disconnected from the chat on this device, but the sign-out didn't complete on the server, so we can't confirm your session ended. Please try again. If you refresh, you may still be signed in until the sign-out succeeds.
-        </div>
-        <button onClick={onRetry} disabled={busy} style={{ padding: '11px 22px', fontSize: 14, fontWeight: 600, background: 'linear-gradient(135deg,#3a55d9,#2f44b8)', color: '#fff', border: 'none', borderRadius: 10, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.7 : 1, fontFamily: "'DM Sans', sans-serif" }}>
-          {busy ? 'Retrying…' : 'Retry sign out'}
-        </button>
-      </div>
-    </div>
-  );
-}
+// VIF Phase 4B2: the truthful sign-out-error state and the branded loading state are
+// rendered from the reusable, organization-driven components in ./authComponents
+// (SignOutError / AuthLoading), so the auth experience stays visually connected.
 
 function WelcomeCard({ name, onOpenGuide, onDismiss }) {
   const firstName = (name || '').split(' ')[0];
@@ -2851,8 +2834,8 @@ function App() {
     );
   }
 
-  if (phase === 'signingOut') return <AuthLoading config={orgConfig} />;
-  if (phase === 'signOutError') return <SignOutError onRetry={() => controller.retry()} />;
+  if (phase === 'signingOut') return <AuthLoading config={orgConfig} lineKey="signingOutLine" />;
+  if (phase === 'signOutError') return <SignOutError config={orgConfig} onRetry={() => controller.retry()} />;
 
   if (phase !== 'community') {
     // booting / checkingSession / entryChoice / emailEntry / requestingCode / codeEntry /

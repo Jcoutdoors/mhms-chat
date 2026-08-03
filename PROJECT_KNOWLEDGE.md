@@ -1264,6 +1264,22 @@ logic. Peer-message `instructor` (`msg.user.instructor`) is **unchanged legacy/c
 is preserved and **read-only** (the verified path never writes it); the one-time WelcomeCard flag is a
 separate non-authoritative per-device UI key.
 
+**Configuration-driven authentication experience (4B2 experience pass):** Phase 4B2 also includes the
+branded verified-auth entry experience. It is **configuration-driven and organization-agnostic**: the
+reusable components in `src/authComponents.jsx` render entirely from an `orgConfig` object
+(`src/orgConfig.js`) — assistant name/avatar/introduction, entry headline, new/returning labels +
+descriptions, verification copy, org name/tagline, community label, brand color, and background — and
+hard-code **no** assistant, brand, or program name (enforced by a test that scans the component source
+for forbidden literals). **ATLAS is the Mental Health Made Simple *implementation* of the reusable
+assistant identity — not a platform-wide fixed name.** The character asset is the transparent
+`./atlas-hero-transparent.png` (served from repo root; `atlas-hero-white.png` fallback). When the
+assistant is disabled in config, no avatar renders (no empty container), the persona name is dropped,
+and copy resolves to neutral, org-centered language — with the same layout quality. A white-label org
+swaps `orgConfig` (different assistant/avatar/copy, or assistant disabled) with no component change.
+The experience is responsive (validated 375–1280 px, short/tall/iframe-full-height, no horizontal
+overflow, ATLAS not clipped, choices above the fold) and carries the identity through the email, code,
+resend, error, session-expired, signing-out, and sign-out-error screens.
+
 **Verification (4B2):** all suites green (controller/cooldown/listenerBag/auth-service/identity/
 featured/notifications), webpack builds, and a local fetch-stub browser harness (Chromium desktop +
 mobile viewport) validated boot→entryChoice (no ProfileForm flash), New/Returning copy, email entry,
