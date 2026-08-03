@@ -1234,11 +1234,111 @@ modules rather than duplicating them):
 from Stream; auth from the `__Host` cookie; `localStorage` id/email/instructor **ignored**; no
 client-side `emailToUserId` for chat connection; legacy `cats_profile` non-authoritative.
 
-**Remaining Phase 4B (4B2/4B3, not in this increment):** wire the new gate into `App()` boot
-(replace the `localStorage`-profile boot + `connectChat` + `handleProfileSave` paths, add logout),
-and non-production/manual browser validation. **Production is NOT cut over**, the **legacy token
-Worker remains live and unchanged**, and **Phase 4C is still required** (production bundle publish,
-browser matrix, Squarespace-iframe validation, rollback, live regression). Phase 4C **not started**.
+**Increment 4B2 is implemented on branch `phase4b2-app-wiring` (PR #22); pending review, NOT
+merged, NOT deployed.** It adds the controller/lifecycle core and wires it into `App()`:
+- `src/authController.js` — `createAuthController(deps)` owns the `authState` machine + the Stream
+  client lifecycle. Token lifetime is local to the connect op only (never snapshot/state/storage/
+  log/error). Single explicit client lifecycle (disconnect-before-connect; partial-connection
+  cleanup; retry teardown; logout clears `clientRef` even if disconnect throws). A **generation
+  guard** makes late completions after logout no-ops. **Truthful logout:** on logout START it
+  disconnects Stream and clears ALL local authenticated/profile state (`clearSensitive`) regardless
+  of the server result; server success → `entryChoice`, failure → `signOutError` (does **not** claim
+  the session ended). Post-save it rebuilds `currentUser` from the authoritative Stream read;
+  instructor only from `/token`; save never writes `instructor`.
+- `src/cooldown.js` — deadline-based resend cooldown (no drift); the App owns the 1 s interval.
+- `src/listenerBag.js` — a generation-scoped disposable collection of Stream unsubscribe handles.
+- `src/authState.js` — added `signingOut`/`signOutError` states + `LOGOUT_OK`/`LOGOUT_FAILED`.
+- `src/authClient.js` — `getToken` now surfaces the server `instructor` claim (fail-closed).
+- `src/index.jsx` — App wiring: `controller.boot()` replaces the `localStorage` boot (no ProfileForm
+  flash before the `/token` check); render gating by auth phase (AuthGate / ProfileForm / signingOut
+  loader / truthful `SignOutError` / community chat shell); the verified ProfileForm has **no email
+  field**; `connectChat`'s post-connect body is extracted into a **generation-aware `setupChannels`**
+  (checks `isCurrent()` before each stage/state-mutation/listener, routes every listener through a
+  `listenerBag` disposed on stale/logout/replacement); profile save + logout go through the
+  controller; App-owned cooldown ticks `resendCooldown` into the UI.
+
+**Authority in the new source (4B2):** current-user `instructor` gating uses **only** the in-memory
+`/token` claim — never `localStorage`, never Stream's current-user `instructor`, never email-derived
+logic. Peer-message `instructor` (`msg.user.instructor`) is **unchanged legacy/client-writable debt**
+(documented in `TECHNICAL_DEBT.md`); Stream permissions are **not server-enforced**. `cats_profile`
+is preserved and **read-only** (the verified path never writes it); the one-time WelcomeCard flag is a
+separate non-authoritative per-device UI key.
+
+**Configuration-driven authentication experience (4B2 experience pass):** Phase 4B2 also includes the
+branded verified-auth entry experience. It is **configuration-driven and organization-agnostic**: the
+reusable components in `src/authComponents.jsx` render entirely from an `orgConfig` object
+(`src/orgConfig.js`) — assistant name/avatar/introduction, entry headline, new/returning labels +
+descriptions, verification copy, org name/tagline, community label, brand color, and background — and
+hard-code **no** assistant, brand, or program name (enforced by a test that scans the component source
+for forbidden literals). **ATLAS is the Mental Health Made Simple *implementation* of the reusable
+assistant identity — not a platform-wide fixed name.** The character asset is the transparent
+`./atlas-hero-transparent.png` (served from repo root; `atlas-hero-white.png` fallback). When the
+assistant is disabled in config, no avatar renders (no empty container), the persona name is dropped,
+and copy resolves to neutral, org-centered language — with the same layout quality. A white-label org
+swaps `orgConfig` (different assistant/avatar/copy, or assistant disabled) with no component change.
+The experience is responsive (validated 375–1280 px, short/tall/iframe-full-height, no horizontal
+overflow, ATLAS not clipped, choices above the fold) and carries the identity through the email, code,
+resend, error, session-expired, signing-out, and sign-out-error screens.
+
+**Host-in-card composition (4B2 host pass):** the assistant is integrated **into** the card as the host
+who welcomes and guides — not a hero floating above it. On mobile the character is centered at the top
+of the card (overlapping its top edge) with the welcome copy and the two answer options below; at
+`min-width: 640px` a CSS media-query branch switches to **side-by-side** (character left, welcome copy
+right) with the options below, so character and copy read as one unit. The reading sequence is
+see-ATLAS → hear-ATLAS (welcome + prompt) → answer-ATLAS (the two options). The entry options are
+typographic answer rows (label + description + chevron; no dominant icon circles) with hover/focus/
+active states. Secondary screens use a compact host header (small integrated character + org eyebrow)
+so the flow never reverts to a bare utility form. Assistant-disabled removes the character area cleanly
+(no empty space) and uses an org-centered layout with neutral copy at the same quality. Enforced by
+tests: a responsive `@media (min-width:640px)` branch with `flex-direction: row`, the character rendered
+inside the card, and no hardcoded ATLAS/MHMS/CATS in the reusable components.
+
+**Functional corrections (4B2 closeout):**
+- **Session expiry:** the controller has an explicit `sessionExpired()` (mid-session; makes NO server
+  call — the session is already gone) that advances the generation, disconnects Stream, and clears ALL
+  local authenticated/profile state (no `localStorage` restoration) before the truthful `sessionExpired`
+  screen. `retry()` from `sessionExpired` returns to the verified sign-in flow (`entryChoice`) only — it
+  never reconnects or reuses a prior identity; stale async cannot reconnect (generation guard). Accepted
+  only from an authenticated state (a no-op elsewhere). Unit-tested. NOTE: the runtime *trigger* that
+  decides when to declare a live session expired from Stream signals is intentionally **not** wired in
+  4B2 (a speculative trigger could false-positive-kick users on a transient drop); it is deferred to the
+  Phase 4C connected-path validation + hardening.
+- **Legacy profile-hint boundary** (`src/profileForm.js`, tested): legacy `cats_profile` hints pre-fill
+  ONLY a genuinely bare/first-time profile (no authoritative Stream name). Editing an EXISTING Stream
+  profile uses Stream values only — no legacy name/bio/link/color/image fallback; absent Stream fields
+  stay empty/default — so a save can never resurrect stale local values.
+
+**Verification (4B2):** all suites green (controller/cooldown/listenerBag/profileForm/auth-service/
+identity/featured/notifications), webpack builds, and a local fetch-stub browser harness (Chromium
+desktop + mobile) validated boot→entryChoice (no ProfileForm flash), New/Returning copy, email entry,
+request-code→code entry, the App-owned cooldown countdown, and the safe verify-failure path.
+
+**Status (Approved with Notes; merged to `main`):** Phase 4B2 implementation and automated validation
+are **complete and approved**, including the **approved ATLAS host experience** (host-in-card, responsive
+mobile-centered → desktop side-by-side, final scale). PR #22 is merged; **production remains on the
+legacy root bundle** (not cut over).
+
+**Live validation deferred to Phase 4C (by the approved-origin boundary — working as designed):** the
+controlled real-Stream **no-clobber proof** and the **connected browser-path validation** (valid-session
+restore, connected Stream, profile routing/save, instructor true/false, logout success/failure,
+session-expiry, channels/history/badges/threads/Welcome/Featured, listener cleanup) require a live
+verified session, which the auth service will only grant to the real app served from the **approved
+origin `https://chat.mentalhealthmadesimple.life`** (exact server-side `Origin` check on every endpoint).
+That origin currently serves the legacy bundle, so these gates are **correctly deferred to the Phase 4C
+cutover** (they run immediately after publishing the new bundle to the approved origin). The
+approved-origin constraint must **not** be bypassed (no Origin spoofing, no temporary preview origin, no
+auth-service weakening). Real Safari is part of the same Phase 4C device matrix.
+
+**Rollback remains available at all times:** the prior production **root `chat.bundle.js` is unchanged
+and recoverable from git**, and the **legacy token Worker (`mhms-chat-token`) remains live and unchanged**
+— so a cutover can be reverted by restoring the prior root bundle (and the app continues to function on
+the legacy Worker). The branch's rebuilt bundle is intentionally **not** published.
+
+**Remaining after 4B2 → Phase 4C** (production bundle publish/cutover to the approved origin, then the
+deferred real-Stream proof + connected browser validation + Squarespace-iframe validation + device matrix
+incl. Safari + the session-expiry runtime trigger, then a stabilization window before any legacy-Worker
+retirement). Peer-message `instructor` remains **legacy/client-writable debt**, Stream permissions are
+**not server-enforced**, and **Phase 4C is not started.**
 
 ## QA SAFETY GUARDRAILS (required for all QA work)
 

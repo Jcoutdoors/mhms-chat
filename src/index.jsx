@@ -41,6 +41,21 @@ import {
   assembleFeaturedItems,
   relativeDate as featuredRelativeDate,
 } from './featuredUpdates';
+// VIF Phase 4B2 — verified-auth wiring. The controller owns the auth state machine and
+// the Stream client lifecycle; App is a thin binding. Identity (canonical userId), the
+// Stream token, and the instructor claim ALL come from the auth service (/token) — never
+// derived in the browser, never persisted. The Stream connect uses { id } only
+// (connectVerified) so it can never clobber a server-side profile. Production remains on
+// the legacy token Worker until Phase 4C; this path is behind review, not yet cut over.
+import { createAuthController } from './authController';
+import { getToken, requestCode, verifyCode, logout as authLogout } from './authClient';
+import { connectVerified, disconnectVerified, saveProfile as streamSaveProfile, readStreamProfile } from './streamConnect';
+import { remainingSeconds } from './cooldown';
+import { createListenerBag } from './listenerBag';
+import { AuthGate, AuthLoading, SignOutError } from './authComponents';
+import { MHMS_ORG_CONFIG } from './orgConfig';
+import { readLegacyUiHints } from './legacyStorage';
+import { profileFormInitial } from './profileForm';
 
 // Load emoji-mart from CDN at runtime
 let emojiMartPromise = null;
@@ -300,10 +315,13 @@ const btnPrimary = {
   boxShadow: '0 4px 12px rgba(58,85,217,0.28)',
 };
 
-function ProfileForm({ initial = {}, onSave, title, subtitle, showIntro = false, isReturning = false }) {
+// VIF Phase 4B2: the verified-auth profile form has NO editable email field — email is
+// used for verification only and never derives identity (that comes from /token). Name,
+// color, bio, link, and existing image behavior are unchanged. `saveError` surfaces a
+// controller save failure; `saving` disables the button while the save is in flight.
+function ProfileForm({ initial = {}, onSave, title, subtitle, showIntro = false, isReturning = false, saveError = '', saving = false }) {
   const [firstName, setFirstName] = useState(initial.firstName || '');
   const [lastName, setLastName] = useState(initial.lastName || '');
-  const [email, setEmail] = useState(initial.email || '');
   const [bio, setBio] = useState(initial.bio || '');
   const [link, setLink] = useState(initial.link || '');
   const [color, setColor] = useState(initial.color || AVATAR_COLORS[0].value);
@@ -311,12 +329,12 @@ function ProfileForm({ initial = {}, onSave, title, subtitle, showIntro = false,
   const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
 
   function handleSave() {
+    if (saving) return;
     if (!firstName.trim()) { setError('First name is required.'); return; }
     if (!lastName.trim()) { setError('Last name is required.'); return; }
-    const e = email.trim();
-    if (!e) { setError('Email is required.'); return; }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) { setError('Please enter a valid email address.'); return; }
-    onSave({ firstName: firstName.trim(), lastName: lastName.trim(), email: e, bio: bio.trim(), link: link.trim(), color, name: fullName });
+    setError('');
+    // No email in the payload: identity is the verified /token userId, not email-derived.
+    onSave({ firstName: firstName.trim(), lastName: lastName.trim(), bio: bio.trim(), link: link.trim(), color, name: fullName });
   }
 
   return (
@@ -333,11 +351,11 @@ function ProfileForm({ initial = {}, onSave, title, subtitle, showIntro = false,
           <div style={{ background: isReturning ? '#f0f6ff' : '#f7f7f7', border: '1px solid #e6eefb', borderRadius: 10, padding: '13px 15px', marginBottom: 18, fontSize: 12.5, color: '#555', lineHeight: 1.55 }}>
             {isReturning ? (
               <span>
-                <strong style={{ color: '#2456b0' }}>Welcome back!</strong> Adding your email just links this device to your account. Your profile and your place in the community are safe, nothing to set up again. This simply lets you sign in across your phone and laptop seamlessly, with no separate account to manage.
+                <strong style={{ color: '#2456b0' }}>Welcome back!</strong> Your email is verified. Update anything you like below — your place in the community is safe, nothing to set up again.
               </span>
             ) : (
               <span>
-                <strong style={{ color: '#1a1a1a' }}>First time here?</strong> Add your name and email to join. Your email is how you sign in, so use the same one on any device and you will always come back as you, with no separate account to set up.
+                <strong style={{ color: '#1a1a1a' }}>First time here?</strong> Your email is verified — just add your name to join. You'll always come back as you on any device you verify, with no separate account to manage.
               </span>
             )}
           </div>
@@ -350,13 +368,6 @@ function ProfileForm({ initial = {}, onSave, title, subtitle, showIntro = false,
           <div>
             <label style={labelStyle}>Last Name</label>
             <input style={inputStyle} value={lastName} onChange={e => setLastName(e.target.value)} placeholder="Johnson" />
-          </div>
-        </div>
-        <div style={{ marginBottom: 12 }}>
-          <label style={labelStyle}>Email</label>
-          <input style={inputStyle} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" />
-          <div style={{ fontSize: 11.5, color: '#999', marginTop: 5, lineHeight: 1.45 }}>
-            Used to keep your account synced across your devices. Use the same email on your phone and laptop to stay signed in as you.
           </div>
         </div>
         <div style={{ marginBottom: 12 }}>
@@ -375,12 +386,16 @@ function ProfileForm({ initial = {}, onSave, title, subtitle, showIntro = false,
             ))}
           </div>
         </div>
-        {error && <div style={{ color: '#c00', fontSize: 13, marginBottom: 12 }}>{error}</div>}
-        <button onClick={handleSave} style={btnPrimary}>Save Profile</button>
+        {(error || saveError) && <div style={{ color: '#c00', fontSize: 13, marginBottom: 12 }}>{error || saveError}</div>}
+        <button onClick={handleSave} disabled={saving} style={{ ...btnPrimary, opacity: saving ? 0.7 : 1, cursor: saving ? 'default' : 'pointer' }}>{saving ? 'Saving…' : 'Save Profile'}</button>
       </div>
     </div>
   );
 }
+
+// VIF Phase 4B2: the truthful sign-out-error state and the branded loading state are
+// rendered from the reusable, organization-driven components in ./authComponents
+// (SignOutError / AuthLoading), so the auth experience stays visually connected.
 
 function WelcomeCard({ name, onOpenGuide, onDismiss }) {
   const firstName = (name || '').split(' ')[0];
@@ -800,7 +815,7 @@ function MembersList({ chatClient, activeChannel, currentUserId }) {
   );
 }
 
-function Sidebar({ groups, activeId, onSelect, currentUser, chatClient, activeChannel, onEditProfile, unreadCounts = {}, mentionCounts = {}, isMobile = false, mobileNavOpen = false, onCloseMobileNav }) {
+function Sidebar({ groups, activeId, onSelect, currentUser, chatClient, activeChannel, onEditProfile, onLogout, unreadCounts = {}, mentionCounts = {}, isMobile = false, mobileNavOpen = false, onCloseMobileNav }) {
   const name = currentUser?.name || '';
   const color = currentUser?.color || '#3b73d8';
 
@@ -856,8 +871,8 @@ function Sidebar({ groups, activeId, onSelect, currentUser, chatClient, activeCh
 
       <MembersList chatClient={chatClient} activeChannel={activeChannel} currentUserId={currentUser?.id} />
 
-      <div style={{ padding: '10px 14px', borderTop: '1px solid #eef0f5', flexShrink: 0 }}>
-        <button onClick={onEditProfile} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '4px', borderRadius: 8, transition: 'background 0.15s' }} onMouseEnter={e => e.currentTarget.style.background = '#efefef'} onMouseLeave={e => e.currentTarget.style.background = 'none'} title="Edit your profile">
+      <div style={{ padding: '10px 14px', borderTop: '1px solid #eef0f5', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <button onClick={onEditProfile} style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '4px', borderRadius: 8, transition: 'background 0.15s' }} onMouseEnter={e => e.currentTarget.style.background = '#efefef'} onMouseLeave={e => e.currentTarget.style.background = 'none'} title="Edit your profile">
           <div style={{ position: 'relative' }}>
             <Avatar name={name} color={color} size={28} image={currentUser?.image} />
             <div style={{ position: 'absolute', bottom: -1, right: -1, width: 8, height: 8, borderRadius: '50%', background: '#22c55e', border: '1.5px solid #f9f9f9' }} />
@@ -865,6 +880,11 @@ function Sidebar({ groups, activeId, onSelect, currentUser, chatClient, activeCh
           <span style={{ fontSize: 12, fontWeight: 500, color: '#333', flex: 1, textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
           <span style={{ fontSize: 11, color: '#bbb' }}>Edit</span>
         </button>
+        {onLogout && (
+          <button onClick={onLogout} title="Sign out" aria-label="Sign out" style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '6px', borderRadius: 8, color: '#969cac', display: 'flex', alignItems: 'center', transition: 'background 0.15s, color 0.15s' }} onMouseEnter={e => { e.currentTarget.style.background = '#efefef'; e.currentTarget.style.color = '#c0392b'; }} onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = '#969cac'; }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+          </button>
+        )}
       </div>
     </div>
     </React.Fragment>
@@ -1162,12 +1182,39 @@ function ChannelSearchPanel({ channel, onJumpInfo }) {
   );
 }
 
+// LEGACY (pre-4B2). `cats_profile` is now treated as READ-ONLY: the verified-auth path
+// never writes it (identity/instructor come from /token, profile from Stream). These
+// helpers remain only for rollback safety and legacy UI hints — do not write cats_profile
+// from the verified flow. (storeProfile is intentionally retained but unused by 4B2.)
 function getStoredProfile() {
   try { return JSON.parse(localStorage.getItem('cats_profile') || 'null'); } catch { return null; }
 }
 function storeProfile(p) {
   try { localStorage.setItem('cats_profile', JSON.stringify(p)); } catch {}
 }
+
+// `welcomed` is a NON-AUTHORITATIVE, per-device UI preference (decision 1): it only gates
+// the one-time WelcomeCard and carries no identity/instructor authority. It lives under a
+// dedicated key so `cats_profile` stays untouched (decision 7). Keyed by the canonical
+// Stream userId (already public within Stream), never by email.
+const WELCOMED_UI_KEY = 'cats_ui_welcomed';
+function hasSeenWelcome(userId) {
+  if (!userId) return false;
+  try { const a = JSON.parse(localStorage.getItem(WELCOMED_UI_KEY) || '[]'); return Array.isArray(a) && a.includes(userId); } catch { return false; }
+}
+function markSeenWelcome(userId) {
+  if (!userId) return;
+  try {
+    const a = JSON.parse(localStorage.getItem(WELCOMED_UI_KEY) || '[]');
+    const set = new Set(Array.isArray(a) ? a : []);
+    set.add(userId);
+    localStorage.setItem(WELCOMED_UI_KEY, JSON.stringify(Array.from(set)));
+  } catch { /* UI pref only; ignore */ }
+}
+
+// ProfileForm initial values now come from ./profileForm (pure, tested). Legacy cats_profile
+// hints pre-fill ONLY a bare first-time profile; an existing Stream profile uses Stream
+// values only (see profileForm.js). Callers pass readLegacyUiHints() as the hints source.
 
 // Custom thread header with a clear, pronounced close control (Stream's default
 // close button is faint and hard to find, on mobile and desktop). closeThread is
@@ -1815,9 +1862,37 @@ function App() {
   const [activeId, setActiveId] = useState(getInitialChannelId);
   const [error, setError] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
-  const [showProfileForm, setShowProfileForm] = useState(false);
   const [showWelcome, setShowWelcome] = useState(false);
-  const [isSignup, setIsSignup] = useState(false);
+  // VIF Phase 4B2 — verified-auth snapshot (mirrors the controller's state machine) and
+  // the App-owned resend cooldown (seconds remaining, recomputed once/second from the
+  // controller's absolute deadline). `orgConfig` drives the reusable auth UI copy/branding.
+  const [auth, setAuth] = useState(() => ({ phase: 'booting', entryPath: null, error: null, cooldownDeadline: null, userId: null, instructor: false, user: null }));
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const orgConfig = MHMS_ORG_CONFIG;
+  // The active generation's listener bag (disposed on stale setup / logout / replacement),
+  // and a ref indirection so the once-created controller always calls the freshest
+  // setupChannels closure without capturing stale App state.
+  const authBagRef = useRef(null);
+  const setupChannelsImplRef = useRef(() => {});
+  const controllerRef = useRef(null);
+  if (!controllerRef.current) {
+    controllerRef.current = createAuthController({
+      authClient: { getToken, requestCode, verifyCode, logout: authLogout },
+      makeStreamClient: () => StreamChat.getInstance(APP_CONFIG.apiKey),
+      connect: (client, userId, token) => connectVerified(client, userId, token),
+      disconnect: (client) => disconnectVerified(client),
+      save: (client, userId, data) => streamSaveProfile(client, userId, data),
+      readProfile: (client) => readStreamProfile(client),
+      setupChannels: (args) => setupChannelsImplRef.current(args),
+      onChange: (snap) => setAuth(snap),
+      now: Date.now,
+    });
+  }
+  const controller = controllerRef.current;
+  // Keep the controller pointed at the freshest setupChannels closure (captures the current
+  // render's setters/refs) without recreating the controller. setupChannels is a hoisted
+  // declaration below, so this assignment is valid here.
+  setupChannelsImplRef.current = setupChannels;
   const [unreadCounts, setUnreadCounts] = useState({});
   const [mentionCounts, setMentionCounts] = useState({});
   const [rosterMembers, setRosterMembers] = useState([]);
@@ -1878,26 +1953,13 @@ function App() {
     }
   }, [currentUser]);
 
-  const threadListenersRef = useRef([]);
-
-  function teardownThreadListeners() {
-    threadListenersRef.current.forEach(unsubscribe => {
-      try {
-        unsubscribe();
-      } catch (e) {
-        console.warn(
-          '[CATS THREAD DIAG] listener cleanup failed',
-          e.message
-        );
-      }
-    });
-
-    threadListenersRef.current = [];
-  }
-
+  // VIF Phase 4B2: all Stream listeners (message.new, notification.message_new, thread
+  // replies, connection.recovered) are now registered through the active generation's
+  // listenerBag (authBagRef), which setupChannels disposes on client replacement/retry and
+  // the phase effect disposes on logout/teardown. On unmount we dispose whatever is live.
   useEffect(() => {
     return () => {
-      teardownThreadListeners();
+      if (authBagRef.current) { authBagRef.current.dispose(); authBagRef.current = null; }
     };
   }, []);
 
@@ -1907,26 +1969,73 @@ function App() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  useEffect(() => {
-    const stored = getStoredProfile();
-    if (!stored) { setIsSignup(true); setShowProfileForm(true); }
-    else if (!stored.email) {
-      // Existing pre-email profile: ask them to add an email once. Treated as signup so
-      // identity is rederived from the email and connects on the stable ID. Their name
-      // and color are pre-filled, so it is a quick confirm, not a rebuild.
-      setIsSignup(true); setShowProfileForm(true);
-    }
-    else { setCurrentUser(stored); connectChat(stored); }
-  }, []);
+  // VIF Phase 4B2 boot: the controller performs the /token session check. No localStorage
+  // identity is read; the render starts in `booting` (a loading state), so the profile form
+  // can never flash before the session check finishes. SESSION_NONE -> entryChoice;
+  // SERVICE_ERROR -> a retryable service-error state; a valid session -> verified Stream
+  // connect -> community (existing profile) or profileSetup (bare user).
+  useEffect(() => { controller.boot(); }, []);
 
-  async function connectChat(profile) {
+  // currentUser is derived ONLY from the controller snapshot: canonical userId + Stream
+  // profile fields + the in-memory /token instructor claim. `welcomed` is a non-authoritative
+  // per-device UI hint. No localStorage/Stream/email-derived instructor is ever trusted.
+  useEffect(() => {
+    if (auth.user && auth.user.id) {
+      setCurrentUser({ ...auth.user, welcomed: hasSeenWelcome(auth.user.id) });
+    } else {
+      setCurrentUser(null);
+    }
+  }, [auth.user]);
+
+  // App owns the resend-cooldown interval. It recomputes whole seconds remaining from the
+  // controller's absolute deadline once per second, clears itself when the deadline passes,
+  // and is torn down on unmount / deadline change. Only the seconds value reaches the UI.
+  useEffect(() => {
+    const deadline = auth.cooldownDeadline;
+    if (!deadline) { setResendCooldown(0); return undefined; }
+    let iv = null;
+    const tick = () => {
+      const secs = remainingSeconds(deadline, Date.now());
+      setResendCooldown(secs);
+      if (secs <= 0 && iv) { clearInterval(iv); iv = null; }
+    };
+    tick();
+    iv = setInterval(tick, 1000);
+    return () => { if (iv) clearInterval(iv); };
+  }, [auth.cooldownDeadline]);
+
+  // Dispose the active generation's Stream listeners whenever we leave the connected states
+  // (logout, sign-out error, service error, session end). The controller has already
+  // disconnected Stream; this ensures no JS listeners linger. setupChannels also disposes
+  // the prior bag on client replacement/retry, so this is the logout/teardown counterpart.
+  useEffect(() => {
+    const connectedPhases = ['loadingProfile', 'profileSetup', 'savingProfile', 'community'];
+    if (!connectedPhases.includes(auth.phase)) {
+      if (authBagRef.current) { authBagRef.current.dispose(); authBagRef.current = null; }
+      if (clientRef.current) clientRef.current = null;
+      setChatClient((c) => (c ? null : c));
+      setChannelMap((m) => (Object.keys(m).length ? {} : m));
+    }
+  }, [auth.phase]);
+
+  // VIF Phase 4B2 — generation-aware post-connect channel setup. The controller has ALREADY
+  // connected `client` via connectVerified ({ id } only — no profile clobber, no token here)
+  // and invokes this as setupChannels({ client, userId, user, isCurrent }). We consult
+  // isCurrent() before every network stage, after each await, and before every App-state
+  // mutation or listener registration; if the operation goes stale (logout / client
+  // replacement / retry) we dispose exactly the listeners we registered and commit nothing
+  // more. All Stream listeners are registered through `bag` so they can be disposed together.
+  async function setupChannels({ client, userId, user, isCurrent }) {
+    // Dispose any prior generation's listeners first (retry / client replacement) so we never
+    // leave stale listeners attached or register duplicates for a new connection.
+    if (authBagRef.current) { authBagRef.current.dispose(); authBagRef.current = null; }
+    const bag = createListenerBag();
+    authBagRef.current = bag;
+    // Internal alias so the existing body (which reads profile.id / profile.name) is unchanged.
+    const profile = (user && user.id) ? user : { id: userId };
     try {
-      const res = await fetch(`${APP_CONFIG.tokenUrl}?user_id=${encodeURIComponent(profile.id)}`);
-      const data = await res.json();
-      if (!data.token) throw new Error('Token not returned.');
-      const client = StreamChat.getInstance(APP_CONFIG.apiKey);
+      if (!isCurrent()) { bag.dispose(); return; }
       clientRef.current = client;
-      await client.connectUser({ id: profile.id, name: profile.name, color: profile.color, image: profile.image || undefined, bio: profile.bio || '', link: profile.link || '', instructor: !!profile.instructor }, data.token);
 
       const initialId = getInitialChannelId();
       const initialChDef = ALL_CHANNELS.find(c => c.id === initialId) || ALL_CHANNELS.find(c => c.id === 'cats-general');
@@ -1958,6 +2067,7 @@ function App() {
       } catch (e) {
         // fall through; we'll at least set up the active channel below
       }
+      if (!isCurrent()) { bag.dispose(); return; } // after the queryChannels await
 
       // Ensure every cohort channel exists in the map AND the user is a member (membership
       // is what makes notification.message_new fire for channels they aren't watching).
@@ -1971,6 +2081,7 @@ function App() {
         const isMember = ch.state && ch.state.members && ch.state.members[profile.id];
         if (!isMember) {
           try { await ch.addMembers([profile.id]); } catch (e) {}
+          if (!isCurrent()) { bag.dispose(); return; } // after each membership mutation
         }
       }
 
@@ -1980,6 +2091,7 @@ function App() {
         await activeCh.watch({ presence: true });
         map[initialChDef.id] = activeCh;
       } catch (e) {}
+      if (!isCurrent()) { bag.dispose(); return; } // after the watch await, before committing App state
 
       setChatClient(client);
       setChannelMap(map);
@@ -2006,17 +2118,20 @@ function App() {
         // Don't show a badge on the channel we're landing in; mark it read instead.
         delete seededUnread[initialChDef.id];
         delete seededMentions[initialChDef.id];
+        if (!isCurrent()) { bag.dispose(); return; } // before committing unread/mention state
         setUnreadCounts(seededUnread);
         setMentionCounts(seededMentions);
         if (map[initialChDef.id]) { try { await map[initialChDef.id].markRead(); } catch (e) {} }
       } catch (e) {
         // if read state isn't available, fall back to live-only counting
       }
+      if (!isCurrent()) { bag.dispose(); return; }
       // v63 SOURCE CANDIDATE: channel unread data has reached a known state (success or
       // fallback) either way, so the Welcome Back recap may now safely read unreadCounts.
       setChannelUnreadReady(true);
 
       const detectAndAlert = (event, channelLabelMap) => {
+        if (!isCurrent()) return; // stale generation: ignore late events
         const chId = event.channel_id || event.cid?.replace('messaging:', '');
         if (!chId) return;
         const msg = event.message || {};
@@ -2051,14 +2166,15 @@ function App() {
         }
       };
 
-      client.on('message.new', event => detectAndAlert(event));
-      client.on('notification.message_new', event => detectAndAlert(event));
+      if (!isCurrent()) { bag.dispose(); return; } // before registering any listener
+      { const s = client.on('message.new', event => detectAndAlert(event)); bag.add(() => s.unsubscribe()); }
+      { const s = client.on('notification.message_new', event => detectAndAlert(event)); bag.add(() => s.unsubscribe()); }
       requestNotificationPermission();
 
-      // v62 SOURCE CANDIDATE — thread reply notifications.
-      teardownThreadListeners();
-
+      // v62 SOURCE CANDIDATE — thread reply notifications. Registered through the bag so a
+      // stale generation (logout / replacement) disposes them with everything else.
       const handleThreadReply = async event => {
+        if (!isCurrent()) return; // stale generation: ignore late thread events
         console.log(
           '[CATS THREAD DIAG] notification.thread_message_new received',
           {
@@ -2177,9 +2293,7 @@ function App() {
         handleThreadReply
       );
 
-      threadListenersRef.current.push(() => {
-        threadReplySubscription.unsubscribe();
-      });
+      bag.add(() => threadReplySubscription.unsubscribe());
 
       // Persisted reconciliation.
       //
@@ -2256,6 +2370,7 @@ function App() {
               }
             );
 
+            if (!isCurrent()) return; // stale generation: do not mutate thread state
             upsertThreadNote(setThreadNotes, {
               threadId: thread.id,
               channelId,
@@ -2285,24 +2400,27 @@ function App() {
       // v63 SOURCE CANDIDATE: reconcileThreads is intentionally not awaited here (matches
       // the existing fire-and-forget v62 behavior), but .finally() marks thread recovery
       // "settled" either way so the Welcome Back recap knows when it may safely read
-      // threadNotes, without ever blocking the rest of connectChat or the chat UI on it.
-      reconcileThreads('initial-connect').finally(() => setThreadRecoveryReady(true));
+      // threadNotes, without ever blocking the rest of setup or the chat UI on it. Guarded so
+      // a stale generation never flips the ready flag or mutates state.
+      reconcileThreads('initial-connect').finally(() => { if (isCurrent()) setThreadRecoveryReady(true); });
 
       const recoveredSubscription = client.on(
         'connection.recovered',
-        () => reconcileThreads('connection.recovered')
+        () => { if (isCurrent()) reconcileThreads('connection.recovered'); }
       );
 
-      threadListenersRef.current.push(() => {
-        recoveredSubscription.unsubscribe();
-      });
+      bag.add(() => recoveredSubscription.unsubscribe());
 
       // v63.1 Featured Updates retrieval — same fire-and-forget, settle-either-way pattern as
       // reconcileThreads. `map` here already has membership ensured by the addMembers loop
-      // above, so the access check sees the loaded, member channel.
-      retrieveFeaturedUpdates(client, map, profile).finally(() => setFeaturedUpdatesReady(true));
+      // above, so the access check sees the loaded, member channel. isCurrent is threaded in
+      // so a stale generation neither sets featuredItems nor flips the ready flag.
+      retrieveFeaturedUpdates(client, map, profile, isCurrent).finally(() => { if (isCurrent()) setFeaturedUpdatesReady(true); });
     } catch (e) {
-      setError('Chat error: ' + e.message);
+      // A genuinely unexpected setup failure: dispose our listeners and propagate so the
+      // controller routes to serviceError (rather than leaving a half-built chat).
+      if (authBagRef.current === bag) { bag.dispose(); authBagRef.current = null; }
+      throw e;
     }
   }
 
@@ -2375,12 +2493,12 @@ function App() {
   // channel, filtered server-side by author, 7-day horizon, and top-level-only. Failures are
   // isolated per channel; a total failure yields an empty list, and the caller always marks
   // featuredUpdatesReady true afterwards so Welcome Back proceeds with channel/thread content.
-  async function retrieveFeaturedUpdates(client, map, profile) {
+  async function retrieveFeaturedUpdates(client, map, profile, isCurrent = () => true) {
     const cfg = ASSISTANT_CONFIG.featuredUpdates;
     const check = validateFeaturedUpdatesConfig(cfg, isConfiguredProductionChannelId);
     if (!check.ok) {
       if (check.invalid) console.warn('[CATS FEATURED] section disabled, invalid config:', check.reason);
-      setFeaturedItems([]);
+      if (isCurrent()) setFeaturedItems([]);
       return;
     }
     const store = getFeaturedAckStore();
@@ -2421,7 +2539,7 @@ function App() {
       console.warn('[CATS FEATURED] assembly failed:', e.message);
       items = [];
     }
-    setFeaturedItems(items);
+    if (isCurrent()) setFeaturedItems(items);
   }
 
   // v63 SOURCE CANDIDATE — Welcome Back summary.
@@ -2554,7 +2672,7 @@ function App() {
   }
 
   useEffect(() => {
-    if (!chatClient || !currentUser || showProfileForm) return;
+    if (auth.phase !== 'community' || !chatClient || !currentUser) return;
     if (!channelUnreadReady || !threadRecoveryReady || !featuredUpdatesReady) return;
     if (wasReturningUserRef.current !== true) return; // brand-new user this session: never show
     if (showWelcomeBack) return;
@@ -2579,7 +2697,7 @@ function App() {
     writeAcknowledgedRecap(recap);
     setShowWelcomeBack(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatClient, currentUser, showProfileForm, channelUnreadReady, threadRecoveryReady, featuredUpdatesReady, unreadCounts, channelMap, threadNotes, featuredItems, showWelcomeBack]);
+  }, [auth.phase, chatClient, currentUser, channelUnreadReady, threadRecoveryReady, featuredUpdatesReady, unreadCounts, channelMap, threadNotes, featuredItems, showWelcomeBack]);
 
   function dismissWelcomeBack() {
     acknowledgeDisplayedFeatured();
@@ -2649,51 +2767,84 @@ function App() {
     return () => { cancelled = true; clearInterval(interval); };
   }, [chatClient]);
 
+  // VIF Phase 4B2: profile save is delegated entirely to the controller. Identity and the
+  // instructor claim are NOT derived here — the controller saves to Stream with the
+  // authoritative /token userId (no instructor written), rebuilds currentUser from the
+  // authoritative Stream read, runs generation-aware channel setup, and enters community
+  // only on success. On failure it stays in profileSetup with a safe error. The form only
+  // carries name/color/bio/link (+image); no email, no emailToUserId, no isInstructorEmail.
   async function handleProfileSave(profileData) {
-    // Identity is derived from the email, so the same email is the same account anywhere.
-    const id = await emailToUserId(profileData.email);
-    const instructor = isInstructorEmail(profileData.email);
-    const prior = getStoredProfile();
-    // Preserve whether this person has already seen the welcome card.
-    const welcomed = !!(prior && prior.welcomed);
-    const profile = { ...profileData, id, instructor, welcomed };
-    storeProfile(profile);
-    setCurrentUser(profile);
-    setShowProfileForm(false);
-    if (isSignup) { setIsSignup(false); await connectChat(profile); }
-    else if (clientRef.current) {
-      // If the email changed the derived ID, reconnect as the new identity.
-      if (clientRef.current.user && clientRef.current.user.id !== id) {
-        await connectChat(profile);
-      } else {
-        await clientRef.current.upsertUser({ id: profile.id, name: profile.name, color: profile.color, image: profile.image || undefined, bio: profile.bio || '', link: profile.link || '', instructor });
-      }
-    }
+    await controller.saveProfile(profileData);
   }
 
-  // Show the one-time welcome card once the person is connected, if they have not seen it.
+  // Show the one-time WelcomeCard once connected, if this device hasn't seen it. Gated on
+  // the community phase so it never appears during profile setup/editing.
   useEffect(() => {
-    if (chatClient && currentUser && !currentUser.welcomed && !showProfileForm) {
+    if (auth.phase === 'community' && chatClient && currentUser && !currentUser.welcomed) {
       setShowWelcome(true);
     }
-  }, [chatClient, currentUser, showProfileForm]);
+  }, [auth.phase, chatClient, currentUser]);
 
   function dismissWelcome(openGuide) {
-    const updated = { ...(currentUser || {}), welcomed: true };
-    storeProfile(updated);
-    setCurrentUser(updated);
+    if (currentUser && currentUser.id) markSeenWelcome(currentUser.id); // non-authoritative UI pref
+    setCurrentUser((u) => (u ? { ...u, welcomed: true } : u));
     setShowWelcome(false);
     if (openGuide) handleChannelSelect(GETTING_STARTED_ID);
   }
 
   if (error) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: '#c00', padding: '2rem', textAlign: 'center' }}>{error}</div>;
 
-  if (showProfileForm) {
-    const stored = getStoredProfile();
-    const isReturning = !!(stored && stored.firstName && !stored.email);
-    return <ProfileForm initial={stored || {}} onSave={handleProfileSave} title={isSignup ? 'Welcome to CATS Program' : 'Edit Your Profile'} subtitle={isSignup ? 'Set up your profile to get started' : 'Update your info anytime'} showIntro={isSignup} isReturning={isReturning} />;
+  // VIF Phase 4B2 render gating, driven by the controller's auth phase. Pre-chat phases are
+  // rendered by AuthGate (loading / entry choice / email / code / service error); profile
+  // setup + save render ProfileForm; sign-out renders a loading / truthful-error state; only
+  // `community` renders the chat shell. Because the initial phase is `booting`, the profile
+  // form can never flash before the /token session check resolves.
+  const phase = auth.phase;
+  const authErr = (auth.error && auth.error.error) ? auth.error.error : '';
+
+  if (phase === 'profileSetup' || phase === 'savingProfile') {
+    const editingExisting = !!(auth.user && auth.user.name); // has a Stream profile already
+    return (
+      <ProfileForm
+        initial={profileFormInitial(auth.user, editingExisting ? null : readLegacyUiHints())}
+        onSave={handleProfileSave}
+        title={editingExisting ? 'Edit Your Profile' : 'Welcome to CATS Program'}
+        subtitle={editingExisting ? 'Update your info anytime' : 'Set up your profile to get started'}
+        showIntro={!editingExisting}
+        isReturning={auth.entryPath === 'returning'}
+        saving={phase === 'savingProfile'}
+        saveError={authErr === 'save_failed' ? 'Something went wrong saving your profile. Please try again.' : ''}
+      />
+    );
   }
 
+  if (phase === 'signingOut') return <AuthLoading config={orgConfig} lineKey="signingOutLine" />;
+  if (phase === 'signOutError') return <SignOutError config={orgConfig} onRetry={() => controller.retry()} />;
+
+  if (phase !== 'community') {
+    // booting / checkingSession / entryChoice / emailEntry / requestingCode / codeEntry /
+    // verifying / authenticating / loadingProfile / serviceError / sessionExpired.
+    return (
+      <AuthGate
+        state={phase}
+        config={orgConfig}
+        isReturning={auth.entryPath === 'returning'}
+        error={authErr}
+        busy={false}
+        resendCooldown={resendCooldown}
+        handlers={{
+          onNew: () => controller.chooseEntry('new'),
+          onReturning: () => controller.chooseEntry('returning'),
+          onRequestCode: (emailAddr) => controller.requestCode(emailAddr),
+          onVerifyCode: (code) => controller.submitCode(code),
+          onResend: () => controller.resend(),
+          onRetry: () => controller.retry(),
+        }}
+      />
+    );
+  }
+
+  // phase === 'community': chat shell. Wait for the connected client + channels.
   if (!chatClient || Object.keys(channelMap).length === 0) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#fff' }}>
@@ -2814,7 +2965,7 @@ function App() {
           .str-chat__main-panel{width:100%!important}
         }
       `}</style>
-      <Sidebar groups={APP_CONFIG.channelGroups} activeId={activeId} onSelect={handleChannelSelect} currentUser={currentUser} chatClient={chatClient} activeChannel={activeChannel} onEditProfile={() => setShowProfileForm(true)} unreadCounts={unreadCounts} mentionCounts={mentionCounts} isMobile={isMobile} mobileNavOpen={mobileNavOpen} onCloseMobileNav={() => setMobileNavOpen(false)} />
+      <Sidebar groups={APP_CONFIG.channelGroups} activeId={activeId} onSelect={handleChannelSelect} currentUser={currentUser} chatClient={chatClient} activeChannel={activeChannel} onEditProfile={() => controller.editProfile()} onLogout={() => controller.logout()} unreadCounts={unreadCounts} mentionCounts={mentionCounts} isMobile={isMobile} mobileNavOpen={mobileNavOpen} onCloseMobileNav={() => setMobileNavOpen(false)} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', minHeight: 0, minWidth: 0 }}>
         {/* Persistent live-consult bar, visible across all channels */}
         <a href={APP_CONFIG.consult.link} target="_blank" rel="noopener noreferrer"
