@@ -130,11 +130,11 @@ test('wrong-path: routing depends on completeness/connect result, not the chosen
 });
 
 test('post-logout: late async success events are no-ops (cannot reconnect)', () => {
-  const afterLogout = transition(S.LOADING_PROFILE, E.LOGOUT).state;
-  assert.equal(afterLogout, S.ENTRY_CHOICE);
+  const signingOut = transition(S.LOADING_PROFILE, E.LOGOUT).state; // -> signingOut
+  assert.equal(signingOut, S.SIGNING_OUT);
   for (const ev of [E.SESSION_VALID, E.TOKEN_OK, E.VERIFY_OK, E.PROFILE_COMPLETE]) {
-    const r = applyEvent(afterLogout, ev);
+    const r = applyEvent(signingOut, ev);
     assert.equal(r.changed, false, ev);
-    assert.equal(r.state, S.ENTRY_CHOICE);
+    assert.equal(r.state, S.SIGNING_OUT);
   }
 });

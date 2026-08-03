@@ -46,6 +46,12 @@ const STATES = Object.freeze({
   COMMUNITY: 'community',
   SESSION_EXPIRED: 'sessionExpired',
   SERVICE_ERROR: 'serviceError',
+  // Truthful logout (Phase 4B2): logout is an async operation. `signingOut` is the
+  // transient state while /logout is in flight; `signOutError` is entered when the
+  // server logout FAILS (Stream already disconnected + chat state cleared, but the
+  // server session may still be valid) — the UI must not claim the user is signed out.
+  SIGNING_OUT: 'signingOut',
+  SIGN_OUT_ERROR: 'signOutError',
 });
 
 const EVENTS = Object.freeze({
@@ -71,6 +77,8 @@ const EVENTS = Object.freeze({
   SAVE_FAIL: 'SAVE_FAIL',
   EDIT_PROFILE: 'EDIT_PROFILE',
   LOGOUT: 'LOGOUT',
+  LOGOUT_OK: 'LOGOUT_OK',       // server /logout succeeded -> entryChoice
+  LOGOUT_FAILED: 'LOGOUT_FAILED', // server /logout failed -> signOutError
   SESSION_EXPIRED: 'SESSION_EXPIRED',
   SERVICE_ERROR: 'SERVICE_ERROR',
   RETRY: 'RETRY',
@@ -81,13 +89,15 @@ const E = EVENTS;
 
 const ALL_STATES = new Set(Object.values(STATES));
 
-// LOGOUT is global from every state except booting.
-const LOGOUT_EXCLUDED = new Set([S.BOOTING]);
-
-// SESSION_EXPIRED is global from any state where an authenticated session may exist.
-const SESSION_EXPIRY_STATES = new Set([
+// Logout is meaningful only where an authenticated session may exist. The global
+// LOGOUT event from one of these enters the transient `signingOut` state (the async
+// logout then dispatches LOGOUT_OK / LOGOUT_FAILED). From other states LOGOUT is a
+// no-op. This is also the set from which SESSION_EXPIRED is accepted.
+const AUTHENTICATED_STATES = new Set([
   S.AUTHENTICATING, S.LOADING_PROFILE, S.PROFILE_SETUP, S.SAVING_PROFILE, S.COMMUNITY,
 ]);
+const SESSION_EXPIRY_STATES = AUTHENTICATED_STATES;
+const LOGOUT_STATES = AUTHENTICATED_STATES;
 
 // Per-state (non-global) transitions. LOGOUT/SESSION_EXPIRED are handled globally
 // and are intentionally NOT listed here.
@@ -135,12 +145,18 @@ const TRANSITIONS = Object.freeze({
   [S.COMMUNITY]: { [E.EDIT_PROFILE]: S.PROFILE_SETUP },
   [S.SESSION_EXPIRED]: { [E.RETRY]: S.ENTRY_CHOICE },
   [S.SERVICE_ERROR]: { [E.RETRY]: S.CHECKING_SESSION },
+  // Truthful async logout. Only LOGOUT_OK/LOGOUT_FAILED are valid here, so a late
+  // async success event (VERIFY_OK/TOKEN_OK/PROFILE_COMPLETE) arriving after logout
+  // is a no-op and cannot reconnect the user.
+  [S.SIGNING_OUT]: { [E.LOGOUT_OK]: S.ENTRY_CHOICE, [E.LOGOUT_FAILED]: S.SIGN_OUT_ERROR },
+  [S.SIGN_OUT_ERROR]: { [E.RETRY]: S.SIGNING_OUT },
 });
 
 // Resolve a global safety event. Returns a next state or null if not applicable.
 function resolveGlobal(current, event) {
   if (!ALL_STATES.has(current)) return null;
-  if (event === E.LOGOUT && !LOGOUT_EXCLUDED.has(current)) return S.ENTRY_CHOICE;
+  // LOGOUT (from an authenticated state) begins the async sign-out -> signingOut.
+  if (event === E.LOGOUT && LOGOUT_STATES.has(current)) return S.SIGNING_OUT;
   if (event === E.SESSION_EXPIRED && SESSION_EXPIRY_STATES.has(current)) return S.SESSION_EXPIRED;
   return null;
 }
@@ -167,6 +183,6 @@ function canTransition(current, event) {
 
 module.exports = {
   INITIAL_STATE, STATES, EVENTS, TRANSITIONS,
-  LOGOUT_EXCLUDED, SESSION_EXPIRY_STATES,
+  AUTHENTICATED_STATES, LOGOUT_STATES, SESSION_EXPIRY_STATES,
   transition, canTransition, resolveGlobal,
 };
