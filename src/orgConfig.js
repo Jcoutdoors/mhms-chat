@@ -58,7 +58,10 @@ const MHMS_ORG_CONFIG = {
 
     // Phase 4B2 ATLAS experience copy.
     entryHeadline: 'Welcome to the {community}',
-    assistantIntro: "I'm {assistant}. I'll help you get connected.",
+    // The host's spoken welcome (first person). Dropped entirely when the assistant is
+    // disabled (see copyNeutral). Followed by the prompt the two options answer.
+    assistantIntro: "Hi, I'm {assistant}. I'll help you get connected and point you to the right place.",
+    entryPrompt: 'Is this your first time here, or are you returning?',
     newLabel: "I'm new here",
     newDescription: 'Verify your email and set up your community profile.',
     returningLabel: "I've been here before",

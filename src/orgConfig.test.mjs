@@ -23,11 +23,20 @@ test('configured assistant name / image / alt', () => {
   assert.ok((MHMS_ORG_CONFIG.assistant.avatarAlt || '').length > 0);
 });
 
-test('configured assistant introduction is ATLAS-voiced', () => {
+test('configured assistant welcome is ATLAS-voiced and host-like', () => {
   const intro = resolveCopy(MHMS_ORG_CONFIG, 'assistantIntro');
-  assert.ok(intro.includes('ATLAS'), 'assistant name present');
+  assert.ok(/^Hi, I'm ATLAS\./.test(intro), 'host greets in first person');
   assert.ok(/get connected/i.test(intro));
+  assert.ok(/right place/i.test(intro), 'offers to guide');
   assert.equal(intro.includes('{'), false);
+});
+
+test('entry prompt is host-guided, not the old generic wording', () => {
+  const prompt = resolveCopy(MHMS_ORG_CONFIG, 'entryPrompt');
+  assert.equal(prompt, 'Is this your first time here, or are you returning?');
+  assert.equal(/Are you new here/i.test(prompt), false, 'old generic prompt not used');
+  // The prompt is org-neutral, so it survives assistant-disabled unchanged.
+  assert.equal(resolveCopy(disabled, 'entryPrompt'), 'Is this your first time here, or are you returning?');
 });
 
 // ---- MHMS entry / new / returning copy ----
@@ -129,4 +138,32 @@ test('authComponents.jsx contains no hardcoded ATLAS/MHMS/CATS/org copy', () => 
   for (const forbidden of ['ATLAS', 'CATS', 'MHMS', 'Mental Health Made Simple']) {
     assert.equal(src.includes(forbidden), false, `authComponents.jsx must not hardcode "${forbidden}"`);
   }
+});
+
+// ---- host-in-card layout: responsive branch + integrated character ----
+const AUTH_SRC = readFileSync(new URL('./authComponents.jsx', import.meta.url), 'utf8');
+
+test('has a responsive layout branch (mobile centered -> side-by-side on wider screens)', () => {
+  assert.ok(/@media\s*\(min-width:\s*640px\)/.test(AUTH_SRC), 'a min-width media query switches layout');
+  assert.ok(/flex-direction:\s*row/.test(AUTH_SRC), 'side-by-side row layout on wider screens');
+  assert.ok(AUTH_SRC.includes('vif-welcome'), 'welcome (host+copy) responsive container present');
+});
+
+test('the character is integrated INSIDE the card, not floating above it', () => {
+  // In the entry composition, the card (vif-card) must open before the <Hero ...>
+  // character — i.e. the host lives inside the card, never as a sibling above it.
+  const entry = AUTH_SRC.slice(AUTH_SRC.indexOf('function EntryChoice'));
+  const body = entry.slice(0, entry.indexOf('\n}'));
+  const cardAt = body.indexOf('vif-card');
+  const heroAt = body.indexOf('<Hero');
+  assert.ok(cardAt !== -1 && heroAt !== -1, 'entry uses a card and a Hero');
+  assert.ok(cardAt < heroAt, 'card opens before Hero (character is inside the card)');
+  // The host sits in the responsive welcome zone shared with the copy.
+  assert.ok(body.includes('vif-welcome'), 'host + copy share the responsive welcome container');
+});
+
+test('later screens keep a compact integrated host header (not a bare utility form)', () => {
+  assert.ok(/function HostHeader/.test(AUTH_SRC), 'a compact host header exists for secondary screens');
+  const email = AUTH_SRC.slice(AUTH_SRC.indexOf('function EmailVerification'));
+  assert.ok(email.slice(0, email.indexOf('\n}')).includes('HostHeader'), 'email screen uses the host header');
 });

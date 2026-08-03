@@ -1280,6 +1280,19 @@ The experience is responsive (validated 375–1280 px, short/tall/iframe-full-he
 overflow, ATLAS not clipped, choices above the fold) and carries the identity through the email, code,
 resend, error, session-expired, signing-out, and sign-out-error screens.
 
+**Host-in-card composition (4B2 host pass):** the assistant is integrated **into** the card as the host
+who welcomes and guides — not a hero floating above it. On mobile the character is centered at the top
+of the card (overlapping its top edge) with the welcome copy and the two answer options below; at
+`min-width: 640px` a CSS media-query branch switches to **side-by-side** (character left, welcome copy
+right) with the options below, so character and copy read as one unit. The reading sequence is
+see-ATLAS → hear-ATLAS (welcome + prompt) → answer-ATLAS (the two options). The entry options are
+typographic answer rows (label + description + chevron; no dominant icon circles) with hover/focus/
+active states. Secondary screens use a compact host header (small integrated character + org eyebrow)
+so the flow never reverts to a bare utility form. Assistant-disabled removes the character area cleanly
+(no empty space) and uses an org-centered layout with neutral copy at the same quality. Enforced by
+tests: a responsive `@media (min-width:640px)` branch with `flex-direction: row`, the character rendered
+inside the card, and no hardcoded ATLAS/MHMS/CATS in the reusable components.
+
 **Verification (4B2):** all suites green (controller/cooldown/listenerBag/auth-service/identity/
 featured/notifications), webpack builds, and a local fetch-stub browser harness (Chromium desktop +
 mobile viewport) validated boot→entryChoice (no ProfileForm flash), New/Returning copy, email entry,
