@@ -324,6 +324,13 @@ independently**. The live chat has **not** cut over and still uses the legacy to
    `RESEND_API_KEY`, and **`IP_RATE_LIMIT_KEY_SECRET`** (dedicated key for the opaque IP-rate-limit
    DO name; `openssl rand -hex 32`). All six are provisioned; `STREAM_SECRET` reuses the existing
    (un-rotated) Stream app secret. The Durable Object Worker needs **no** secret.
+   - **Instructor allowlist (Phase 4A2, non-secret config):** set **`INSTRUCTOR_EMAILS`** on the
+     `collier-auth-proof` Pages project — **preferably a Cloudflare secret** (or a plaintext
+     environment variable), value = the comma-separated instructor emails (e.g.
+     `instructor-a@example.com, instructor-b@example.org`). The real production addresses live only in
+     the binding, never in Git. Server-side only; the `/token` route derives the `instructor` claim
+     from it (fail-closed to `false` if unset/oversized/malformed). Rotate by editing the value and
+     redeploying `auth/pages`.
 3. **IP rate limiting** is handled by the dedicated **rolling-window** `IpRateLimitDO` (Pages binding
    `IP_RATE_LIMIT_DO`, exported by `collier-verification-do`; server-defined per-route policies) —
    entitlement-independent and fail-closed; no external rate-limit binding to confirm.

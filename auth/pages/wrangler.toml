@@ -29,3 +29,9 @@ script_name = "collier-verification-do"
 #   STREAM_SECRET             -> Stream token minting
 #   RESEND_API_KEY            -> email delivery
 #   IP_RATE_LIMIT_KEY_SECRET  -> opaque IP-rate-limit DO name (dedicated; NOT IDENTITY_KEY_SECRET)
+#
+# Phase 4A2 non-secret config binding (a plaintext environment variable, or a secret
+# if masking is preferred — read as a string either way; NEVER committed here):
+#   INSTRUCTOR_EMAILS         -> separator-delimited instructor allowlist (authorization
+#                                data; server-side only; normalized+hashed to compare
+#                                against the verified session subject; fail-closed if unset)

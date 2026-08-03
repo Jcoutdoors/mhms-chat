@@ -1172,6 +1172,23 @@ runtime/bundle/Worker files changed).
 **Cookie/session prerequisite for Phase 4: satisfied.** See `TECHNICAL_DEBT.md` for the one known
 design characteristic (stateless sessions are not server-side revocable on logout).
 
+### Phase 4A2 — server-derived instructor claim on `/token` (backend only; not yet consumed)
+
+`/token` now returns an additive boolean **`instructor`** alongside `{ok, token, user_id}`,
+derived **server-side** from the verified session subject — never from the browser,
+localStorage, client config, or Stream profile. The session holds only `sub`
+(= `emailToUserId(normalizedEmail)`), so `functions/lib/instructor.js` maps each **configured**
+instructor email through the canonical normalize+hash and matches the resulting user_ids to
+`sub` (no session-format change). The allowlist is a server binding **`INSTRUCTOR_EMAILS`**
+(a plaintext env var or a secret; separator-delimited emails), server-side only, never logged
+or returned. **Fail-closed** to `instructor:false` when unset/blank/malformed.
+
+This is a **narrow backend addition**: `token`/`user_id`/CORS/no-store/credential/session/auth
+behavior are unchanged, and the chat app does **not** yet consume `instructor` (Phase 4B), so it
+is backward-compatible. It authenticates the *claim* only; **Stream role/channel-permission
+enforcement is NOT hardened** (Stream still stores a client-writable `instructor` field) — a
+separate later initiative (see `TECHNICAL_DEBT.md`). Phase 4B and 4C are **not started**.
+
 ## QA SAFETY GUARDRAILS (required for all QA work)
 
 Built directly in response to the v63 truncation incident above, on branch

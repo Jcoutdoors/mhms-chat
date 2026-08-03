@@ -65,15 +65,47 @@ cannot reactivate. **Identity cooldown and rolling-hour accounting commit only o
   session, set the `__Host-` cookie. No cookie on failure. Token never in the body.
 - `POST /token` (`functions/token.js`) — read+verify the session cookie, mint a
   Stream token for the session `sub` using `STREAM_SECRET`, return `{ ok, token,
-  user_id }`. The browser never supplies `user_id`.
+  user_id, instructor }`. The browser never supplies `user_id` or `instructor`.
+
+### Server-derived instructor claim (Phase 4A2)
+`/token` returns an additive boolean **`instructor`** derived **server-side** from the
+verified session subject — never from the browser, localStorage, client config, or Stream
+profile fields. The session stores only `sub` (= `emailToUserId(normalizedEmail)`), so the
+service maps each **configured** instructor email through the SAME canonical
+normalize+hash (`lib/instructor.js`) and compares the resulting user_ids to `sub`. No
+session-format change. **Fail-closed:** missing/blank/malformed config ⇒ `instructor:false`.
+
+- **Config:** `INSTRUCTOR_EMAILS` — a server binding (a plaintext Cloudflare environment
+  variable, or a secret if masking is preferred; read as a string either way), a
+  separator-delimited (`, ; whitespace`) list of instructor emails. It is authorization
+  data: server-side only, never browser-visible, never logged, never returned. The binding
+  name is centralized in `AUTH_CONFIG.instructor.bindingName`.
+- **Compatibility:** additive only — `token`/`user_id` and all CORS/no-store/credential/
+  session/auth behavior are unchanged. The chat app does not yet consume `instructor`
+  (that is Phase 4B), so this is backward-compatible.
+- **Limitation (NOT hardened here):** this authenticates the *claim*; it does **not** enforce
+  Stream roles or channel permissions. Stream still stores a client-writable `instructor`
+  custom field on the user object, so Stream-side privilege enforcement remains a separate,
+  later modernization initiative. See `TECHNICAL_DEBT.md`.
+
 - `POST /logout` (`functions/logout.js`) — clear the cookie (`Max-Age=0`); idempotent;
   no server-side revocation.
 
 Shared modules in `functions/lib/`: `config.js`, `http.js` (CORS/response), `crypto.js`
 (HMAC, CSPRNG code, constant-time), `session.js`, `cookie.js`, `identity.js` (re-exports
-the canonical Phase 1 module), `email.js` (Resend adapter + local capture), `stream.js`,
-`verificationClient.js` (DO client), `ratelimit.js`. Files in `functions/lib/` export no
-`onRequest` handler, so they are import-only modules, not routes.
+the canonical Phase 1 module), `instructor.js` (server-derived instructor claim), `email.js`
+(Resend adapter + local capture), `stream.js`, `verificationClient.js` (DO client),
+`ratelimit.js`. Files in `functions/lib/` export no `onRequest` handler, so they are
+import-only modules, not routes.
+
+### Deploying / rolling back the instructor claim (Phase 4A2)
+- **Provision:** set `INSTRUCTOR_EMAILS` on the `collier-auth-proof` Pages project (e.g.
+  `wrangler pages secret put INSTRUCTOR_EMAILS`, or a plaintext variable in the dashboard),
+  value = the comma-separated instructor emails; then deploy `auth/pages`. No other secret
+  changes. Rotate by editing the value and redeploying.
+- **Rollback:** redeploy the previous auth Pages version (or unset `INSTRUCTOR_EMAILS` →
+  the claim fails closed to `false`). Rollback does not touch the chat app, the legacy token
+  Worker, Stream, or any other secret.
 
 ### Session
 Compact HMAC-SHA256 (JWT-shaped) token; claims `sub`/`iat`/`exp`(=iat+30d)/`ver`.

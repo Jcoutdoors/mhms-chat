@@ -5,7 +5,7 @@
   "type": "module",
   "description": "VIF auth Pages project (auth.mentalhealthmadesimple.life). Phase 0 proof routes preserved; Phase 3 routes not implemented. Not deployed by Phase 2.",
   "scripts": {
-    "test": "node --test test/proofRoutes.test.mjs test/authRoutes.test.mjs",
+    "test": "node --test test/proofRoutes.test.mjs test/authRoutes.test.mjs test/instructor.test.mjs",
     "build": "wrangler pages functions build --outdir=.pages-build",
     "dev": "wrangler pages dev public --do VERIFICATION_DO=VerificationDO@collier-verification-do"
   },
