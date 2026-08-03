@@ -4,7 +4,7 @@ import { isApprovedOrigin, rejectOrigin, preflight, jsonApproved, errorApproved 
 import { readSessionCookie } from './lib/cookie.js';
 import { verifySession } from './lib/session.js';
 import { createStreamToken } from './lib/stream.js';
-import { isInstructorSub } from './lib/instructor.js';
+import { resolveInstructor } from './lib/instructor.js';
 
 export function onRequestOptions(context) { return preflight(context.request, 'POST, OPTIONS'); }
 
@@ -18,14 +18,20 @@ export async function onRequestPost(context) {
   const session = await verifySession(cookie, env.SESSION_SIGNING_SECRET);
   if (!session.ok) return errorApproved('session_invalid', 401);
 
+  // Stream-token minting is the only route-fatal step: a failure here is a genuine
+  // 503. It is kept in its own try/catch so the OPTIONAL instructor claim cannot
+  // interrupt a valid token response.
+  let token;
   try {
-    const token = await createStreamToken(session.sub, env.STREAM_SECRET);
-    // Instructor is derived SERVER-SIDE from the verified session subject against a
-    // server-controlled allowlist. The browser cannot supply or override it, and it
-    // fails closed to false. Additive field; token/user_id behavior is unchanged.
-    const instructor = await isInstructorSub(env, session.sub);
-    return jsonApproved({ ok: true, token, user_id: session.sub, instructor });
+    token = await createStreamToken(session.sub, env.STREAM_SECRET);
   } catch {
     return errorApproved('service_unavailable', 503);
   }
+
+  // Instructor is derived SERVER-SIDE from the verified session subject against a
+  // server-controlled allowlist. resolveInstructor ALWAYS returns a literal boolean
+  // and never throws — any config/derivation failure fails closed to false without
+  // affecting token/user_id. The browser cannot supply or override it.
+  const instructor = await resolveInstructor(env, session.sub);
+  return jsonApproved({ ok: true, token, user_id: session.sub, instructor });
 }
