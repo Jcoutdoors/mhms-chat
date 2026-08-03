@@ -149,6 +149,18 @@ test('has a responsive layout branch (mobile centered -> side-by-side on wider s
   assert.ok(AUTH_SRC.includes('vif-welcome'), 'welcome (host+copy) responsive container present');
 });
 
+test('the host scales up on tablet then desktop (co-equal focal point, wider host column)', () => {
+  // Tablet enlarges the character and gives it a wider flex-basis column.
+  const tablet = AUTH_SRC.slice(AUTH_SRC.indexOf('@media (min-width:640px)'));
+  assert.ok(/\.vif-hero-lead\{width:180px;height:180px;margin:0;flex:0 0 180px\}/.test(tablet), 'tablet host ~180px on a widened column');
+  // Desktop adds a further scale-up and widens the entry card so copy stays roomy.
+  assert.ok(/@media\s*\(min-width:\s*1024px\)/.test(AUTH_SRC), 'a desktop (1024px) prominence branch exists');
+  const desktop = AUTH_SRC.slice(AUTH_SRC.indexOf('@media (min-width:1024px)'));
+  assert.ok(/\.vif-hero-lead\{width:205px;height:205px;flex:0 0 205px\}/.test(desktop), 'desktop host ~205px');
+  assert.ok(/\.vif-shell--wide\{max-width:600px\}/.test(desktop), 'entry card widens on desktop so copy is not cramped');
+  assert.ok(AUTH_SRC.includes('vif-shell--wide') && AUTH_SRC.includes('Frame config={config} wide'), 'only the entry Frame opts into the wider shell');
+});
+
 test('the character is integrated INSIDE the card, not floating above it', () => {
   // In the entry composition, the card (vif-card) must open before the <Hero ...>
   // character — i.e. the host lives inside the card, never as a sibling above it.

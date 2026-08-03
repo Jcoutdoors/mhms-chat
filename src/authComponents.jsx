@@ -29,15 +29,26 @@ function styleSheet(brand) {
   return `
 .vif-auth :focus-visible{outline:3px solid ${brand}59;outline-offset:2px;border-radius:12px}
 .vif-card{position:relative;overflow:visible;width:100%;box-sizing:border-box;background:#fff;border-radius:20px;padding:22px 24px 22px;box-shadow:0 16px 44px rgba(30,45,90,0.13);border:1px solid rgba(255,255,255,0.7)}
+/* The shell caps the card width. Entry widens on desktop (vif-shell--wide) so the larger
+   host and the welcome copy each get room; other screens stay compact at 460. */
+.vif-shell{width:100%;max-width:460px;margin:0 auto}
 /* Entry welcome zone: centered host on mobile, side-by-side on wider screens. */
 .vif-welcome{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px}
 .vif-welcome-copy{width:100%}
 .vif-hero-lead{display:block;width:150px;height:150px;object-fit:contain;margin:-46px auto 2px;filter:drop-shadow(0 10px 22px rgba(40,60,120,0.16));user-select:none}
 .vif-prompt{margin:12px 0 2px;font-size:14.5px;font-weight:600;color:#2f3a5e;line-height:1.45}
+/* Tablet: side-by-side host, enlarged ~+22% and given a wider host column. */
 @media (min-width:640px){
-  .vif-welcome{flex-direction:row;align-items:center;text-align:left;gap:20px;margin-top:2px}
-  .vif-welcome-copy{flex:1;width:auto}
-  .vif-hero-lead{width:148px;height:148px;margin:0;flex-shrink:0}
+  .vif-welcome{flex-direction:row;align-items:center;text-align:left;gap:22px;margin-top:2px}
+  .vif-welcome-copy{flex:1 1 auto;min-width:0;width:auto}
+  .vif-hero-lead{width:180px;height:180px;margin:0;flex:0 0 180px}
+}
+/* Desktop: the host becomes a co-equal focal point (~+38% vs the prior desktop size,
+   ~37% of a widened welcome row) with the copy vertically centered beside him. */
+@media (min-width:1024px){
+  .vif-shell--wide{max-width:600px}
+  .vif-welcome{gap:26px}
+  .vif-hero-lead{width:205px;height:205px;flex:0 0 205px}
 }
 /* Choice rows: typographic, no dominant icon circles. */
 .vif-choice{display:flex;align-items:center;gap:12px;width:100%;box-sizing:border-box;text-align:left;padding:14px 16px;border-radius:14px;margin-top:10px;cursor:pointer;background:#fff;border:1.5px solid #e4e8f2;transition:transform .12s ease, box-shadow .12s ease, border-color .12s ease, background .12s ease}
@@ -71,13 +82,13 @@ function HostHeader({ config }) {
   );
 }
 
-function Frame({ config, children }) {
+function Frame({ config, wide, children }) {
   const bg = (config && config.authBackground) || '#f4f6fb';
   return (
     <div className="vif-auth" style={{ position: 'fixed', inset: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', background: bg, fontFamily: FONT, zIndex: 1000 }}>
       <style>{styleSheet(brandOf(config))}</style>
       <div style={{ minHeight: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '26px 16px' }}>
-        <div style={{ width: '100%', maxWidth: 460 }}>{children}</div>
+        <div className={`vif-shell${wide ? ' vif-shell--wide' : ''}`}>{children}</div>
       </div>
     </div>
   );
@@ -185,7 +196,7 @@ export function EntryChoice({ config, onNew, onReturning }) {
   const welcome = resolveCopy(config, 'assistantIntro');
   const prompt = resolveCopy(config, 'entryPrompt');
   return (
-    <Frame config={config}>
+    <Frame config={config} wide>
       <div className="vif-card">
         <div className="vif-welcome">
           <Hero config={config} className="vif-hero-lead" />
