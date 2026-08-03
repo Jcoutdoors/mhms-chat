@@ -27,14 +27,21 @@ function safeParse(raw) {
 function getStore() {
   try { return typeof localStorage !== 'undefined' ? localStorage : null; } catch { return null; }
 }
+// Guarded accessors: a throwing getItem/setItem (e.g. SecurityError in a locked-down
+// or private context) must never propagate to application startup.
+function safeGet(store, key) {
+  try { return store ? store.getItem(key) : null; } catch { return null; }
+}
+function safeSet(store, key, value) {
+  try { if (store) store.setItem(key, value); return true; } catch { return false; }
+}
 
 // Read ONLY non-authoritative UI hints from a legacy blob (e.g. a previously
 // chosen avatar color) — NEVER id, email, or instructor. Returns {} if absent.
 // These hints may pre-fill the profile-setup form but never decide identity,
 // privilege, or new-vs-returning routing.
 function readLegacyUiHints() {
-  const store = getStore();
-  const blob = store ? safeParse(store.getItem(LEGACY_PROFILE_KEY)) : null;
+  const blob = safeParse(safeGet(getStore(), LEGACY_PROFILE_KEY));
   if (!blob || typeof blob !== 'object') return {};
   const hints = {};
   if (typeof blob.color === 'string') hints.color = blob.color;
@@ -47,8 +54,7 @@ function readLegacyUiHints() {
 
 // True iff a legacy identity-bearing field is present (informational only).
 function hasLegacyIdentity() {
-  const store = getStore();
-  const blob = store ? safeParse(store.getItem(LEGACY_PROFILE_KEY)) : null;
+  const blob = safeParse(safeGet(getStore(), LEGACY_PROFILE_KEY));
   return !!(blob && typeof blob === 'object' && (blob.id || blob.email || 'instructor' in blob));
 }
 
@@ -58,15 +64,16 @@ function hasLegacyIdentity() {
 // Never throws.
 function clearLegacyIdentity() {
   const store = getStore();
-  if (!store) return { cleared: false };
-  const blob = safeParse(store.getItem(LEGACY_PROFILE_KEY));
+  const blob = safeParse(safeGet(store, LEGACY_PROFILE_KEY));
   if (!blob || typeof blob !== 'object') return { cleared: false };
   let changed = false;
   for (const f of NON_AUTHORITATIVE_STRIP) {
     if (f in blob) { delete blob[f]; changed = true; }
   }
-  if (changed) { try { store.setItem(LEGACY_PROFILE_KEY, JSON.stringify(blob)); } catch { /* ignore */ } }
-  return { cleared: changed };
+  // Non-destructive: only the identity fields are removed; the record (and its UI
+  // hints) is preserved. A failed write leaves storage untouched and reports safely.
+  if (changed) { const wrote = safeSet(store, LEGACY_PROFILE_KEY, JSON.stringify(blob)); return { cleared: wrote }; }
+  return { cleared: false };
 }
 
 module.exports = {

@@ -7,21 +7,23 @@
 //
 //   1. Connect with the MINIMUM user object — ONLY the canonical `user_id` from
 //      /token — so no profile field is sent at connect time.
-//   2. Read the EXISTING Stream user after connect (for completeness routing).
-//   3. Upsert profile fields ONLY on an intentional profile save, stamping
-//      `profile_version: 1`.
-//   4. Instructor for UI comes ONLY from the /token claim (never from Stream or
-//      localStorage). It may be mirrored onto the Stream user on save for display,
-//      but is never read back as the trusted source.
+//   2. Read the EXISTING Stream user after connect (for completeness routing),
+//      distinguishing a bare user, an existing profile, a connection failure, and
+//      a profile-read/access failure with TYPED results (never silently null).
+//   3. Upsert profile fields ONLY on an intentional profile save, using the
+//      AUTHORITATIVE user_id passed separately from the form data, stamping
+//      `profile_version: 1`. `instructor` is NEVER written by this path.
+//   4. Instructor for UI comes ONLY from the /token claim (in memory). This module
+//      never reads Stream `instructor` as trusted and never writes it.
 //
-// Stream Chat's `connectUser(user, token)` UPSERTS the provided fields and MERGES
-// (it does not delete unspecified custom fields), so connecting with `{ id }` only
-// preserves existing name/bio/link/color/image. This module guarantees OUR side of
-// that contract (we send only the id); a live end-to-end confirmation belongs to
-// the Phase 4C cutover validation.
+// Stream Chat's `connectUser(user, token)` UPSERTS the provided fields and is
+// understood to MERGE (not delete unspecified custom fields). This module
+// guarantees OUR side of that contract (we send only the id). The MERGE/no-clobber
+// behavior of the live Stream backend is NOT proven by this module or its mock and
+// remains a Phase 4B2 real-Stream validation requirement.
 //
 // CommonJS; the Stream client is injected so this is unit-testable without a real
-// connection. No React, no localStorage.
+// connection. No React, no localStorage, no token logging/persistence.
 
 'use strict';
 
@@ -32,40 +34,72 @@ function minimalConnectUser(userId) {
   return { id: userId };
 }
 
-// Connect the verified user. `client` is a Stream client (injected). `userId` is
-// the canonical /token user_id; `token` is the /token Stream token. Returns the
-// connected Stream user (with its existing server-side fields preserved).
-async function connectVerified(client, userId, token) {
-  if (!client || typeof client.connectUser !== 'function') throw new Error('invalid_stream_client');
-  if (typeof userId !== 'string' || !userId) throw new Error('invalid_user_id');
-  await client.connectUser(minimalConnectUser(userId), token);
-  return readStreamProfile(client);
+// Validate a canonical user id: a non-empty string. NOT derived or transformed
+// here (identity derivation is server-side only). Whitespace-only is invalid.
+function requireUserId(userId) {
+  if (typeof userId !== 'string' || userId.trim() === '') throw new Error('invalid_user_id');
+  return userId;
 }
 
-// The existing Stream user after connect, used for profile-completeness routing.
+// Connect the verified user and classify the outcome with a TYPED result — never
+// a silent null. Distinguishes:
+//   { ok:true, status:'existing_profile', user }  — connected, has a usable profile
+//   { ok:true, status:'bare_user', user }         — connected, minimal/new user
+//   { ok:false, error:'connect_failed' }          — connectUser threw
+//   { ok:false, error:'profile_read_failed' }     — connected but reading the user threw / absent
+// The 4B2 layer must route connect_failed/profile_read_failed to a service/retry
+// state (NEVER to profile setup); only a genuine bare_user routes to setup.
+async function connectVerified(client, userId, token) {
+  if (!client || typeof client.connectUser !== 'function') throw new Error('invalid_stream_client');
+  requireUserId(userId);
+  try {
+    await client.connectUser(minimalConnectUser(userId), token);
+  } catch {
+    return { ok: false, error: 'connect_failed' };
+  }
+  let user;
+  try {
+    user = readStreamProfile(client);
+  } catch {
+    return { ok: false, error: 'profile_read_failed' };
+  }
+  if (!user || typeof user !== 'object') {
+    // Connected but the SDK exposed no user object — an access failure, not "new user".
+    return { ok: false, error: 'profile_read_failed' };
+  }
+  const hasProfile = typeof user.name === 'string' && user.name.trim() !== '';
+  const versioned = typeof user.profile_version === 'number' && user.profile_version >= 1;
+  return { ok: true, status: hasProfile || versioned ? 'existing_profile' : 'bare_user', user };
+}
+
+// The connected Stream user, or throws only if the client itself is broken. Callers
+// in connectVerified wrap this; direct callers get the raw value/exception.
 function readStreamProfile(client) {
   return client && client.user ? client.user : null;
 }
 
-// Fields the app is allowed to write on an intentional profile save. Optional
-// fields absent from `profileData` are simply omitted (not nulled), so a partial
-// save never wipes an existing value. `profile_version: 1` is always stamped.
-// `opts.instructor` (a SERVER-derived boolean from /token) is mirrored for display
-// only when explicitly provided — never guessed client-side.
-function buildProfileUpsert(profileData, opts = {}) {
+// Build the upsert payload for an intentional profile save. The AUTHORITATIVE
+// `userId` is the ONLY source of `id` — `profileData.id` / `profileData.user_id`
+// are ignored, so no form-controlled field can override the authenticated identity.
+// Optional fields absent/empty are omitted (never null-wipe an existing value).
+// `profile_version: 1` is always stamped. `instructor` is NEVER written by this path.
+function buildProfileUpsert(userId, profileData) {
+  requireUserId(userId);
   const src = profileData || {};
-  const out = { id: src.id };
+  const out = { id: userId }; // authoritative id only; src.id / src.user_id ignored
   for (const f of ['name', 'color', 'image', 'bio', 'link']) {
     if (src[f] !== undefined && src[f] !== null && src[f] !== '') out[f] = src[f];
   }
-  if (typeof opts.instructor === 'boolean') out.instructor = opts.instructor;
+  // Deliberately NO instructor: it is not authoritative here and is never transmitted
+  // by the verified-auth save path. Existing Stream instructor fields are left as-is
+  // (not deleted/cleared) for rollback compatibility.
   return markProfileVersion(out); // -> stamps profile_version: 1
 }
 
-// Upsert the profile on intentional save (injected client).
-async function saveProfile(client, profileData, opts = {}) {
+// Upsert the profile on intentional save using the authoritative user id (injected client).
+async function saveProfile(client, userId, profileData) {
   if (!client || typeof client.upsertUser !== 'function') throw new Error('invalid_stream_client');
-  const payload = buildProfileUpsert(profileData, opts);
+  const payload = buildProfileUpsert(userId, profileData);
   await client.upsertUser(payload);
   return payload;
 }
@@ -77,6 +111,6 @@ async function disconnectVerified(client) {
 }
 
 module.exports = {
-  minimalConnectUser, connectVerified, readStreamProfile,
+  minimalConnectUser, requireUserId, connectVerified, readStreamProfile,
   buildProfileUpsert, saveProfile, disconnectVerified,
 };

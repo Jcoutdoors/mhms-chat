@@ -1200,11 +1200,13 @@ This is a **narrow backend addition**: `token`/`user_id`/CORS/no-store/credentia
 behavior are unchanged, and the chat app does **not** yet consume `instructor` (Phase 4B), so it
 is backward-compatible. It authenticates the *claim* only; **Stream role/channel-permission
 enforcement is NOT hardened** (Stream still stores a client-writable `instructor` field) — a
-separate later initiative (see `TECHNICAL_DEBT.md`). Phase 4B and 4C are **not started**.
+separate later initiative (see `TECHNICAL_DEBT.md`). **Phase 4B is IN PROGRESS (branch-only,
+not merged/deployed — see below); Phase 4C is not started.**
 
 ### Phase 4B — application verified-auth integration (IN PROGRESS; NOT wired to production)
 
-**Increment 4B1 landed on `phase4b-verified-auth-integration` (NOT merged, NOT deployed):** the
+**Increment 4B1 is committed to the Phase 4B branch `phase4b-verified-auth-integration` in
+PR #21; pending review and merge (branch-only, NOT merged, NOT deployed):** the
 tested application integration layer that consumes the deployed auth service, without touching the
 production startup path or bundle. New browser modules (each unit-tested, composing the Phase 4A1
 modules rather than duplicating them):
@@ -1215,7 +1217,9 @@ modules rather than duplicating them):
 - `src/streamConnect.js` — connect with the **minimum user object (`{id}` only)** so a returning
   user's server profile is never clobbered; read the existing Stream user for completeness routing;
   upsert profile fields **only on intentional save**, stamping `profile_version: 1`. Instructor for
-  UI comes only from the `/token` claim (mirrored to Stream on save only when a boolean is given).
+  UI comes **only** from the `/token` claim (in memory); the verified-auth save path **never
+  writes `instructor`** to Stream. Legacy Stream `instructor` fields may remain for rollback
+  compatibility but are not authoritative and are not updated by this path.
 - `src/legacyStorage.js` — de-authorizes legacy `cats_profile`: exposes only non-authoritative UI
   hints (never `id`/`email`/`instructor`), and lazily strips identity fields **non-destructively**
   (rollback-safe).

@@ -67,3 +67,33 @@ test('clearLegacyIdentity is a no-op when nothing to strip / storage absent', ()
   assert.equal(clearLegacyIdentity().cleared, false); // no throw without localStorage
   assert.deepEqual(readLegacyUiHints(), {});
 });
+
+// ---- storage that throws SecurityError (locked-down / private context) ----
+function throwingStorage({ getThrows = false, setThrows = false, removeThrows = false } = {}) {
+  globalThis.localStorage = {
+    getItem() { if (getThrows) throw new DOMException ? new Error('SecurityError') : new Error('SecurityError'); return JSON.stringify(LEGACY); },
+    setItem() { if (setThrows) throw new Error('SecurityError'); },
+    removeItem() { if (removeThrows) throw new Error('SecurityError'); },
+  };
+}
+
+test('SecurityError on getItem: read helpers return safe defaults, no throw', () => {
+  throwingStorage({ getThrows: true });
+  assert.deepEqual(readLegacyUiHints(), {});
+  assert.equal(hasLegacyIdentity(), false);
+  assert.equal(clearLegacyIdentity().cleared, false); // could not read -> nothing cleared
+});
+
+test('SecurityError on setItem: cleanup reports unsuccessful, no throw, nothing propagates', () => {
+  throwingStorage({ setThrows: true }); // getItem returns LEGACY (identity present), setItem throws
+  const res = clearLegacyIdentity();
+  assert.equal(res.cleared, false); // write failed -> reported unsuccessful, not thrown
+  // read helpers still safe:
+  assert.equal(hasLegacyIdentity(), true);
+});
+
+test('SecurityError never propagates to a simulated startup path', () => {
+  throwingStorage({ getThrows: true, setThrows: true });
+  // Simulate the boot sequence touching legacy storage; must not throw.
+  assert.doesNotThrow(() => { readLegacyUiHints(); hasLegacyIdentity(); clearLegacyIdentity(); });
+});

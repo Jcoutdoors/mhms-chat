@@ -11,6 +11,7 @@
 import React, { useState } from 'react';
 import { assistantEnabled, resolveCopy } from './orgConfig.js';
 import { describeError, cooldownSeconds } from './authErrors.js';
+import { normalizeCode, CODE_LENGTH } from './authCodeInput.js';
 
 const FONT = "'DM Sans', sans-serif";
 
@@ -84,40 +85,54 @@ export function EntryChoice({ config, onNew, onReturning }) {
 export function EmailVerification({ config, isReturning, onRequest, error, busy }) {
   const [email, setEmail] = useState('');
   const desc = error ? describeError(error) : null;
+  const canSubmit = email.trim() !== '' && !busy;
+  const submit = (e) => { if (e) e.preventDefault(); if (canSubmit) onRequest(email.trim()); };
   return (
     <Shell>
       <Guide config={config} line={resolveCopy(config, isReturning ? 'returningGuidance' : 'newGuidance')} />
-      <label style={{ fontSize: 13, color: '#555' }}>Email</label>
-      <input style={{ ...inputStyle, marginTop: 6 }} type="email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
-      {desc ? <p style={{ color: '#c0392b', fontSize: 12.5, marginTop: 8 }}>{desc.message}</p> : null}
-      <button style={{ ...primaryBtn(config), width: '100%', marginTop: 14, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => onRequest(email.trim())}>Request code</button>
+      <form onSubmit={submit}>
+        <label htmlFor="auth-email" style={{ fontSize: 13, color: '#555' }}>Email</label>
+        <input id="auth-email" name="email" style={{ ...inputStyle, marginTop: 6 }} type="email" autoComplete="email"
+          value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+        {desc ? <p style={{ color: '#c0392b', fontSize: 12.5, marginTop: 8 }}>{desc.message}</p> : null}
+        <button type="submit" style={{ ...primaryBtn(config), width: '100%', marginTop: 14, opacity: canSubmit ? 1 : 0.6 }} disabled={!canSubmit}>Request code</button>
+      </form>
     </Shell>
   );
 }
 
-export function VerificationCode({ config, onVerify, onResend, error, busy, resendRetryAfterMs }) {
+// `resendCooldown` is the CURRENT remaining seconds (state-owner-updated). This
+// component is presentational and owns NO timer: the state owner (App/4B2) decrements
+// and re-renders. No component-owned interval means no component cleanup obligation.
+export function VerificationCode({ config, onVerify, onResend, error, busy, resendCooldown = 0 }) {
   const [code, setCode] = useState('');
   const desc = error ? describeError(error) : null;
-  const cooldown = cooldownSeconds(resendRetryAfterMs);
+  const cooldown = cooldownSeconds(resendCooldown * 1000);
+  const canVerify = code.length === CODE_LENGTH && !busy;
+  const submit = (e) => { if (e) e.preventDefault(); if (canVerify) onVerify(code); };
   return (
     <Shell>
       <Guide config={config} line={resolveCopy(config, 'verificationGuidance')} />
-      <label style={{ fontSize: 13, color: '#555' }}>Six-digit code</label>
-      <input style={{ ...inputStyle, marginTop: 6, letterSpacing: 4, textAlign: 'center', fontSize: 18 }} inputMode="numeric" maxLength={6}
-        value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" />
-      {desc ? <p style={{ color: '#c0392b', fontSize: 12.5, marginTop: 8 }}>{desc.message}</p> : null}
-      <button style={{ ...primaryBtn(config), width: '100%', marginTop: 14, opacity: busy || code.length !== 6 ? 0.6 : 1 }} disabled={busy || code.length !== 6} onClick={() => onVerify(code)}>Verify code</button>
-      <button style={{ marginTop: 10, width: '100%', background: 'transparent', border: 'none', color: cooldown > 0 ? '#aaa' : (config && config.brandColor) || '#3b73d8', fontSize: 13, cursor: cooldown > 0 ? 'default' : 'pointer' }}
-        disabled={cooldown > 0 || busy} onClick={onResend}>
-        {cooldown > 0 ? `Resend available in ${cooldown}s` : 'Resend code'}
-      </button>
+      <form onSubmit={submit}>
+        <label htmlFor="auth-code" style={{ fontSize: 13, color: '#555' }}>Six-digit code</label>
+        <input id="auth-code" name="code" style={{ ...inputStyle, marginTop: 6, letterSpacing: 4, textAlign: 'center', fontSize: 18 }}
+          inputMode="numeric" autoComplete="one-time-code" maxLength={CODE_LENGTH}
+          value={code} onChange={(e) => setCode(normalizeCode(e.target.value))} placeholder="000000" />
+        {desc ? <p style={{ color: '#c0392b', fontSize: 12.5, marginTop: 8 }}>{desc.message}</p> : null}
+        <button type="submit" style={{ ...primaryBtn(config), width: '100%', marginTop: 14, opacity: canVerify ? 1 : 0.6 }} disabled={!canVerify}>Verify code</button>
+        {/* type=button so resend never submits the verification form */}
+        <button type="button" style={{ marginTop: 10, width: '100%', background: 'transparent', border: 'none', color: cooldown > 0 ? '#aaa' : (config && config.brandColor) || '#3b73d8', fontSize: 13, cursor: cooldown > 0 || busy ? 'default' : 'pointer' }}
+          disabled={cooldown > 0 || busy} onClick={onResend}>
+          {cooldown > 0 ? `Resend available in ${cooldown}s` : 'Resend code'}
+        </button>
+      </form>
     </Shell>
   );
 }
 
 // Presentational switch over the authState string. App() (4B2) supplies `state`,
 // `config`, and `handlers`; profile setup reuses the existing ProfileForm.
-export function AuthGate({ state, config, isReturning, error, busy, resendRetryAfterMs, handlers = {} }) {
+export function AuthGate({ state, config, isReturning, error, busy, resendCooldown, handlers = {} }) {
   switch (state) {
     case 'booting':
     case 'checkingSession':
@@ -133,7 +148,7 @@ export function AuthGate({ state, config, isReturning, error, busy, resendRetryA
       return <EmailVerification config={config} isReturning={isReturning} onRequest={handlers.onRequestCode} error={error} busy={state === 'requestingCode' || busy} />;
     case 'codeEntry':
     case 'verifying':
-      return <VerificationCode config={config} onVerify={handlers.onVerifyCode} onResend={handlers.onResend} error={error} busy={state === 'verifying' || busy} resendRetryAfterMs={resendRetryAfterMs} />;
+      return <VerificationCode config={config} onVerify={handlers.onVerifyCode} onResend={handlers.onResend} error={error} busy={state === 'verifying' || busy} resendCooldown={resendCooldown} />;
     default:
       return null; // profileSetup/community are rendered by App() (ProfileForm / chat shell)
   }
