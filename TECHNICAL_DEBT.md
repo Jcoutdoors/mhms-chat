@@ -117,3 +117,24 @@ new server claim (Phase 4B).
 via Stream roles / channel permissions (server SDK role assignment or channel-level permission
 policies), and have the app trust only the server-derived `/token` claim. Out of scope for Phase 4A2
 (which is authentication/identity, not authorization enforcement).
+
+## VIF Phase 4B2 — current-user instructor is server-sourced, but peer/Stream instructor remains legacy debt
+
+The Phase 4B2 App wiring (`phase4b2-app-wiring`, PR #22 — branch-only, not merged/deployed) now gates
+the **current user's** instructor UI (Announcements posting, `@everyone`) **only** on the in-memory
+`/token` claim — never `localStorage`, never Stream's current-user `instructor`, never email-derived
+logic. The verified-auth connect uses `{ id }` only and the save path never writes `instructor`, so
+the new source no longer *originates* a client instructor value for the signed-in user.
+
+Two related items remain **unchanged legacy debt** (not regressions, and not fixed by 4B2):
+- **Peer-message instructor:** rendering still reads `msg.user.instructor` from Stream for *other*
+  users (e.g. to style/authorize a peer's `@everyone`). That field is client-writable and **not**
+  server-verified, so a determined user could influence how their own messages are treated by other
+  clients. This is the same class of issue as 4A2 above.
+- **Stream permissions are not server-enforced.** Announcement/`@everyone` gating is **client-side UI
+  only**; Stream does not restrict who may post. This is **not** claimed to be server-enforced
+  authorization anywhere in the app.
+
+**Fix, when prioritized:** same as 4A2 — enforce privileged actions via Stream server-side roles /
+channel permissions, and stop trusting any client-writable `instructor` field (current user *or*
+peer). Tracked for the post-cutover hardening initiative, after Phase 4C.

@@ -1234,11 +1234,50 @@ modules rather than duplicating them):
 from Stream; auth from the `__Host` cookie; `localStorage` id/email/instructor **ignored**; no
 client-side `emailToUserId` for chat connection; legacy `cats_profile` non-authoritative.
 
-**Remaining Phase 4B (4B2/4B3, not in this increment):** wire the new gate into `App()` boot
-(replace the `localStorage`-profile boot + `connectChat` + `handleProfileSave` paths, add logout),
-and non-production/manual browser validation. **Production is NOT cut over**, the **legacy token
-Worker remains live and unchanged**, and **Phase 4C is still required** (production bundle publish,
-browser matrix, Squarespace-iframe validation, rollback, live regression). Phase 4C **not started**.
+**Increment 4B2 is implemented on branch `phase4b2-app-wiring` (PR #22); pending review, NOT
+merged, NOT deployed.** It adds the controller/lifecycle core and wires it into `App()`:
+- `src/authController.js` — `createAuthController(deps)` owns the `authState` machine + the Stream
+  client lifecycle. Token lifetime is local to the connect op only (never snapshot/state/storage/
+  log/error). Single explicit client lifecycle (disconnect-before-connect; partial-connection
+  cleanup; retry teardown; logout clears `clientRef` even if disconnect throws). A **generation
+  guard** makes late completions after logout no-ops. **Truthful logout:** on logout START it
+  disconnects Stream and clears ALL local authenticated/profile state (`clearSensitive`) regardless
+  of the server result; server success → `entryChoice`, failure → `signOutError` (does **not** claim
+  the session ended). Post-save it rebuilds `currentUser` from the authoritative Stream read;
+  instructor only from `/token`; save never writes `instructor`.
+- `src/cooldown.js` — deadline-based resend cooldown (no drift); the App owns the 1 s interval.
+- `src/listenerBag.js` — a generation-scoped disposable collection of Stream unsubscribe handles.
+- `src/authState.js` — added `signingOut`/`signOutError` states + `LOGOUT_OK`/`LOGOUT_FAILED`.
+- `src/authClient.js` — `getToken` now surfaces the server `instructor` claim (fail-closed).
+- `src/index.jsx` — App wiring: `controller.boot()` replaces the `localStorage` boot (no ProfileForm
+  flash before the `/token` check); render gating by auth phase (AuthGate / ProfileForm / signingOut
+  loader / truthful `SignOutError` / community chat shell); the verified ProfileForm has **no email
+  field**; `connectChat`'s post-connect body is extracted into a **generation-aware `setupChannels`**
+  (checks `isCurrent()` before each stage/state-mutation/listener, routes every listener through a
+  `listenerBag` disposed on stale/logout/replacement); profile save + logout go through the
+  controller; App-owned cooldown ticks `resendCooldown` into the UI.
+
+**Authority in the new source (4B2):** current-user `instructor` gating uses **only** the in-memory
+`/token` claim — never `localStorage`, never Stream's current-user `instructor`, never email-derived
+logic. Peer-message `instructor` (`msg.user.instructor`) is **unchanged legacy/client-writable debt**
+(documented in `TECHNICAL_DEBT.md`); Stream permissions are **not server-enforced**. `cats_profile`
+is preserved and **read-only** (the verified path never writes it); the one-time WelcomeCard flag is a
+separate non-authoritative per-device UI key.
+
+**Verification (4B2):** all suites green (controller/cooldown/listenerBag/auth-service/identity/
+featured/notifications), webpack builds, and a local fetch-stub browser harness (Chromium desktop +
+mobile viewport) validated boot→entryChoice (no ProfileForm flash), New/Returning copy, email entry,
+request-code→code entry, the App-owned cooldown countdown, and the safe verify-failure path. **Not
+yet done and required before merge:** the controlled real-Stream **no-clobber proof** on an
+accessible verified identity, and a full browser matrix (real Safari; the connected happy path,
+profile save, logout, Welcome/Welcome Back, and chat shell — the harness deliberately stays in the
+no-session path and does not touch Stream).
+
+**Remaining after 4B2:** the real-Stream proof + browser matrix above, then **Phase 4C** (production
+bundle publish/cutover, Squarespace-iframe validation, rollback, live regression). **Production is
+NOT cut over**, the **legacy token Worker remains live and unchanged**, the committed **root
+`chat.bundle.js` is still the production bundle** (the branch's rebuilt bundle is intentionally not
+published), and **Phase 4C is not started.**
 
 ## QA SAFETY GUARDRAILS (required for all QA work)
 
