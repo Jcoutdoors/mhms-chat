@@ -66,6 +66,21 @@ test('getToken returns token + userId on success, error on 401', async () => {
   assert.deepEqual(await getToken({ fetchImpl: no.fn }), { ok: false, error: 'session_required', status: 401 });
 });
 
+test('getToken passes through the server-derived instructor claim (fail-closed)', async () => {
+  // Phase 4A2 added `instructor` to the /token response; the client must surface it
+  // so the controller can gate the CURRENT user on the server claim (never localStorage/Stream).
+  const yes = fakeFetch([{ status: 200, body: { ok: true, token: 't', user_id: 'cats-x', instructor: true } }]);
+  assert.equal((await getToken({ fetchImpl: yes.fn })).instructor, true);
+
+  // Only a literal true is trusted; everything else fails closed to false.
+  for (const v of [false, undefined, 'true', 1, 0, null, {}]) {
+    const body = { ok: true, token: 't', user_id: 'cats-x' };
+    if (v !== undefined) body.instructor = v;
+    const f = fakeFetch([{ status: 200, body }]);
+    assert.equal((await getToken({ fetchImpl: f.fn })).instructor, false, JSON.stringify(v));
+  }
+});
+
 test('logout success', async () => {
   const { fn } = fakeFetch([{ status: 200, body: { ok: true } }]);
   assert.deepEqual(await logout({ fetchImpl: fn }), { ok: true });

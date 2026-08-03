@@ -68,13 +68,16 @@ async function verifyCode(email, code, opts = {}) {
   return r.ok ? { ok: true } : { ok: false, error: r.error, status: r.httpStatus, retryAfterMs: r.retryAfterMs };
 }
 
-// POST /token -> { ok:true, token, userId } | { ok:false, error, status }
+// POST /token -> { ok:true, token, userId, instructor } | { ok:false, error, status }
 // The token is returned to the caller for the Stream connect step but is never
-// logged here; callers must not log it either.
+// logged here; callers must not log it either. `instructor` is the SERVER-DERIVED
+// claim added in Phase 4A2 (from the auth service's INSTRUCTOR_EMAILS binding); it
+// is passed through fail-closed — only a literal `true` is trusted, anything else
+// (absent, "true", 1, …) becomes false. It is never derived in the browser.
 async function getToken(opts = {}) {
   const r = await postJson('/token', {}, opts.fetchImpl);
   if (r.ok && r.data && typeof r.data.token === 'string' && typeof r.data.user_id === 'string') {
-    return { ok: true, token: r.data.token, userId: r.data.user_id };
+    return { ok: true, token: r.data.token, userId: r.data.user_id, instructor: r.data.instructor === true };
   }
   return { ok: false, error: r.error || 'session_invalid', status: r.httpStatus };
 }
