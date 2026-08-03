@@ -1200,7 +1200,45 @@ This is a **narrow backend addition**: `token`/`user_id`/CORS/no-store/credentia
 behavior are unchanged, and the chat app does **not** yet consume `instructor` (Phase 4B), so it
 is backward-compatible. It authenticates the *claim* only; **Stream role/channel-permission
 enforcement is NOT hardened** (Stream still stores a client-writable `instructor` field) — a
-separate later initiative (see `TECHNICAL_DEBT.md`). Phase 4B and 4C are **not started**.
+separate later initiative (see `TECHNICAL_DEBT.md`). **Phase 4B is IN PROGRESS (branch-only,
+not merged/deployed — see below); Phase 4C is not started.**
+
+### Phase 4B — application verified-auth integration (IN PROGRESS; NOT wired to production)
+
+**Increment 4B1 is committed to the Phase 4B branch `phase4b-verified-auth-integration` in
+PR #21; pending review and merge (branch-only, NOT merged, NOT deployed):** the
+tested application integration layer that consumes the deployed auth service, without touching the
+production startup path or bundle. New browser modules (each unit-tested, composing the Phase 4A1
+modules rather than duplicating them):
+- `src/authIntegration.js` — pure flow orchestration: maps `authClient` results → `authState`
+  events, validates the `/token` `instructor` claim **fail-closed** (only literal `true`), and
+  routes by **actual** Stream-profile completeness (so New-vs-Returning path affects copy only —
+  one identity flow underneath). Post-logout, late async success events are automatic no-ops.
+- `src/streamConnect.js` — connect with the **minimum user object (`{id}` only)** so a returning
+  user's server profile is never clobbered; read the existing Stream user for completeness routing;
+  upsert profile fields **only on intentional save**, stamping `profile_version: 1`. Instructor for
+  UI comes **only** from the `/token` claim (in memory); the verified-auth save path **never
+  writes `instructor`** to Stream. Legacy Stream `instructor` fields may remain for rollback
+  compatibility but are not authoritative and are not updated by this path.
+- `src/legacyStorage.js` — de-authorizes legacy `cats_profile`: **strictly read-only.** It exposes
+  only non-authoritative UI hints (never `id`/`email`/`instructor`) and an informational
+  presence check. The verified-auth path **ignores** the legacy identity fields but the **complete
+  `cats_profile` record is preserved unchanged** so a rollback to the current production bundle
+  (which may still require those legacy fields) stays functional; **cleanup of legacy identity data
+  is deferred until after the cutover is stable** (out of scope for Phase 4B).
+- `src/authComponents.jsx` — organization-driven onboarding UI (AuthLoading / EntryChoice /
+  EmailVerification / VerificationCode / AuthServiceError / AuthGate) reading `orgConfig`; nothing
+  hardcodes ATLAS/MHMS/CATS; assistant-disabled mode renders neutral org-branded copy.
+
+**Identity/authority after 4B (by design):** `user_id` and `instructor` from `/token`; profile data
+from Stream; auth from the `__Host` cookie; `localStorage` id/email/instructor **ignored**; no
+client-side `emailToUserId` for chat connection; legacy `cats_profile` non-authoritative.
+
+**Remaining Phase 4B (4B2/4B3, not in this increment):** wire the new gate into `App()` boot
+(replace the `localStorage`-profile boot + `connectChat` + `handleProfileSave` paths, add logout),
+and non-production/manual browser validation. **Production is NOT cut over**, the **legacy token
+Worker remains live and unchanged**, and **Phase 4C is still required** (production bundle publish,
+browser matrix, Squarespace-iframe validation, rollback, live regression). Phase 4C **not started**.
 
 ## QA SAFETY GUARDRAILS (required for all QA work)
 
