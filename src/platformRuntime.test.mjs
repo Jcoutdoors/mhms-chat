@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { reconcileThreadNoteOnOpen, emptyRuntimeState, disposeBagOwned } from './platformRuntime.js';
+import { reconcileThreadNoteOnOpen, emptyRuntimeState, disposeBagOwned, setupStillOwns } from './platformRuntime.js';
 
 const SRC = readFileSync(new URL('./platformRuntime.js', import.meta.url), 'utf8');
 // The hook's contract return is the LAST `return {` in the file (an earlier one belongs to the
@@ -82,6 +82,39 @@ test('disposeBagOwned is a no-op for a null bag', () => {
   const ownerRef = { current: 'x' };
   assert.equal(disposeBagOwned(null, ownerRef), false);
   assert.equal(ownerRef.current, 'x');
+});
+
+// ---- setup-operation ownership: current generation AND still-owned bag ----
+test('setupStillOwns is valid only for a current generation AND the currently-owned bag', () => {
+  const bag = {};
+  const owner = { current: bag };
+  // 1. current generation + currently owned bag -> valid
+  assert.equal(setupStillOwns(() => true, owner, bag), true);
+  // 2. stale generation + owned bag -> invalid
+  assert.equal(setupStillOwns(() => false, owner, bag), false);
+  // 3. current generation + superseded bag (owner now points at a newer bag) -> invalid
+  const newer = {};
+  assert.equal(setupStillOwns(() => true, { current: newer }, bag), false);
+});
+
+test('a same-generation older setup is invalid once a newer bag has replaced it', () => {
+  const older = {};
+  const newer = {};
+  const owner = { current: older };
+  assert.equal(setupStillOwns(() => true, owner, older), true, 'older op valid while it owns the bag');
+  owner.current = newer;                          // a newer same-generation setup installs its bag
+  assert.equal(setupStillOwns(() => true, owner, older), false, 'older op now inert (isCurrent still true)');
+  assert.equal(setupStillOwns(() => true, owner, newer), true, 'newer op is the valid owner');
+});
+
+test('a superseded local bag disposal cannot dispose or clear the newer bag (ownership rule)', () => {
+  const older = { n: 0, dispose() { this.n += 1; } };
+  const newer = { n: 0, dispose() { this.n += 1; } };
+  const owner = { current: newer };               // newer already owns
+  disposeBagOwned(older, owner);                  // older op disposes ITS bag
+  assert.equal(older.n, 1);
+  assert.equal(newer.n, 0, 'newer bag not disposed');
+  assert.equal(owner.current, newer, 'newer ownership preserved');
 });
 
 // ---- mobile presentation decoupling (contract revision #2) ----

@@ -79,6 +79,14 @@ function disposeBagOwned(bag, ownerRef) {
   return false;
 }
 
+// Setup-operation ownership. A setupChannels invocation remains valid only while BOTH its auth
+// generation is current AND its local bag is still the active owned bag. This guards two
+// overlapping same-generation setup calls: once a newer setup installs its own bag, the older
+// op's predicate goes false even though isCurrent() is still true. `ownerRef` is a { current } ref.
+function setupStillOwns(isCurrent, ownerRef, bag) {
+  return isCurrent() && ownerRef.current === bag;
+}
+
 function usePlatformRuntime(deps) {
   const {
     currentUser,                    // session-derived { id, name, instructor, ... } | null (App-owned)
@@ -332,9 +340,13 @@ function usePlatformRuntime(deps) {
     if (authBagRef.current) { authBagRef.current.dispose(); authBagRef.current = null; }
     const bag = createListenerBag();
     authBagRef.current = bag;
+    // After the bag is installed, validity requires BOTH a current generation AND that this op
+    // still owns the active bag. Every checkpoint/handler/finalizer below uses ownsSetup(), not
+    // isCurrent(), so a same-generation newer setup that replaced the bag makes this op inert.
+    const ownsSetup = () => setupStillOwns(isCurrent, authBagRef, bag);
     const profile = (user && user.id) ? user : { id: userId };
     try {
-      if (!isCurrent()) { disposeOwnedBag(bag); return; }
+      if (!ownsSetup()) { disposeOwnedBag(bag); return; }
       clientRef.current = client;
 
       const initialId = getInitialChannelId();
@@ -350,7 +362,7 @@ function usePlatformRuntime(deps) {
         );
         retainConfiguredChannels(queried).forEach((ch) => { map[ch.id] = ch; });
       } catch (e) { /* fall through; set up the active channel below */ }
-      if (!isCurrent()) { disposeOwnedBag(bag); return; }
+      if (!ownsSetup()) { disposeOwnedBag(bag); return; }
 
       for (const chDef of allChannels) {
         let ch = map[chDef.id];
@@ -361,7 +373,7 @@ function usePlatformRuntime(deps) {
         const isMember = ch.state && ch.state.members && ch.state.members[profile.id];
         if (!isMember) {
           try { await ch.addMembers([profile.id]); } catch (e) {}
-          if (!isCurrent()) { disposeOwnedBag(bag); return; }
+          if (!ownsSetup()) { disposeOwnedBag(bag); return; }
         }
       }
 
@@ -370,7 +382,7 @@ function usePlatformRuntime(deps) {
         await activeCh.watch({ presence: true });
         map[initialChDef.id] = activeCh;
       } catch (e) {}
-      if (!isCurrent()) { disposeOwnedBag(bag); return; }
+      if (!ownsSetup()) { disposeOwnedBag(bag); return; }
 
       setChatClient(client);
       setChannelMap(map);
@@ -391,16 +403,16 @@ function usePlatformRuntime(deps) {
         console.log('[CATS DIAG seed] result -> unread:', JSON.stringify(seededUnread), '| mentions:', JSON.stringify(seededMentions));
         delete seededUnread[initialChDef.id];
         delete seededMentions[initialChDef.id];
-        if (!isCurrent()) { disposeOwnedBag(bag); return; }
+        if (!ownsSetup()) { disposeOwnedBag(bag); return; }
         setUnreadCounts(seededUnread);
         setMentionCounts(seededMentions);
         if (map[initialChDef.id]) { try { await map[initialChDef.id].markRead(); } catch (e) {} }
       } catch (e) { /* read state unavailable: fall back to live-only counting */ }
-      if (!isCurrent()) { disposeOwnedBag(bag); return; }
+      if (!ownsSetup()) { disposeOwnedBag(bag); return; }
       setChannelUnreadReady(true);
 
       const detectAndAlert = (event) => {
-        if (!isCurrent()) return;
+        if (!ownsSetup()) return;
         const chId = event.channel_id || event.cid?.replace('messaging:', '');
         if (!chId) return;
         const msg = event.message || {};
@@ -428,13 +440,13 @@ function usePlatformRuntime(deps) {
         }
       };
 
-      if (!isCurrent()) { disposeOwnedBag(bag); return; }
+      if (!ownsSetup()) { disposeOwnedBag(bag); return; }
       { const s = client.on('message.new', (event) => detectAndAlert(event)); bag.add(() => s.unsubscribe()); }
       { const s = client.on('notification.message_new', (event) => detectAndAlert(event)); bag.add(() => s.unsubscribe()); }
       requestNotificationPermission();
 
       const handleThreadReply = async (event) => {
-        if (!isCurrent()) return;
+        if (!ownsSetup()) return;
         console.log('[CATS THREAD DIAG] notification.thread_message_new received', {
           keys: Object.keys(event || {}), channel_id: event.channel_id, cid: event.cid,
           parent_id: event.message?.parent_id, replier: event.message?.user?.id,
@@ -449,7 +461,7 @@ function usePlatformRuntime(deps) {
         try {
           const probe = clientRef.current.channel('messaging', channelId);
           const response = await probe.getMessagesById([parentId]);
-          if (!isCurrent()) return; // stale generation after the async parent lookup: no mutation/notification
+          if (!ownsSetup()) return; // stale generation OR superseded same-gen setup after the async parent lookup
           const parent = response && response.messages && response.messages[0];
           if (!parent) { console.warn('[CATS THREAD DIAG] parent lookup returned no message', parentId); return; }
           if (parent.user?.id !== profile.id) { console.log('[CATS THREAD DIAG] rejected: not my thread', { parentAuthor: parent.user?.id }); return; }
@@ -471,7 +483,7 @@ function usePlatformRuntime(deps) {
       const reconcileThreads = async (trigger) => {
         try {
           const result = await client.queryThreads({ watch: false, limit: 30, participant_limit: 10, reply_limit: 1 });
-          if (!isCurrent()) return; // stale generation after the async queryThreads: skip reconciliation
+          if (!ownsSetup()) return; // stale generation OR superseded same-gen setup after the async queryThreads
           const threads = result.threads || [];
           console.log('[CATS THREAD DIAG] queryThreads result', { trigger, count: threads.length });
           threads.forEach((thread) => {
@@ -485,7 +497,7 @@ function usePlatformRuntime(deps) {
             const channelId = channelObject ? (channelObject.id || (channelObject.cid || '').replace('messaging:', '')) : null;
             if (!channelId) { console.warn('[CATS THREAD DIAG] queryThreads thread missing channel ID', thread.id); return; }
             console.log('[CATS THREAD DIAG] queryThreads reconciled unread thread', { threadId: thread.id, channelId, unread });
-            if (!isCurrent()) return;
+            if (!ownsSetup()) return;
             upsertThreadNote(setThreadNotes, {
               threadId: thread.id, channelId, replierName: lastReply?.user?.name || 'Someone',
               replierId: lastReply?.user?.id, preview: (lastReply?.text || '').slice(0, 120),
@@ -494,12 +506,14 @@ function usePlatformRuntime(deps) {
           });
         } catch (e) { console.warn('[CATS THREAD DIAG] queryThreads reconciliation failed', trigger, e.message); }
       };
-      reconcileThreads('initial-connect').finally(() => { if (isCurrent()) setThreadRecoveryReady(true); });
+      reconcileThreads('initial-connect').finally(() => { if (ownsSetup()) setThreadRecoveryReady(true); });
 
-      const recoveredSubscription = client.on('connection.recovered', () => { if (isCurrent()) reconcileThreads('connection.recovered'); });
+      const recoveredSubscription = client.on('connection.recovered', () => { if (ownsSetup()) reconcileThreads('connection.recovered'); });
       bag.add(() => recoveredSubscription.unsubscribe());
 
-      retrieveFeaturedUpdates(client, map, profile, isCurrent).finally(() => { if (isCurrent()) setFeaturedUpdatesReady(true); });
+      // Pass ownsSetup (not isCurrent) so Featured's final state publication cannot occur after
+      // this setup has been superseded by a same-generation newer setup.
+      retrieveFeaturedUpdates(client, map, profile, ownsSetup).finally(() => { if (ownsSetup()) setFeaturedUpdatesReady(true); });
     } catch (e) {
       disposeOwnedBag(bag);
       throw e;
@@ -522,4 +536,4 @@ function usePlatformRuntime(deps) {
   };
 }
 
-module.exports = { usePlatformRuntime, CONNECTED_PHASES, reconcileThreadNoteOnOpen, emptyRuntimeState, disposeBagOwned };
+module.exports = { usePlatformRuntime, CONNECTED_PHASES, reconcileThreadNoteOnOpen, emptyRuntimeState, disposeBagOwned, setupStillOwns };
