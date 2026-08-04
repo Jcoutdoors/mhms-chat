@@ -1315,8 +1315,8 @@ request-code→code entry, the App-owned cooldown countdown, and the safe verify
 
 **Status (Approved with Notes; merged to `main`):** Phase 4B2 implementation and automated validation
 are **complete and approved**, including the **approved ATLAS host experience** (host-in-card, responsive
-mobile-centered → desktop side-by-side, final scale). PR #22 is merged; **production remains on the
-legacy root bundle** (not cut over).
+mobile-centered → desktop side-by-side, final scale). PR #22 is merged. **Production has since been cut
+over to the verified-auth bundle in Phase 4C — see "Phase 4C — production cutover (COMPLETE)" below.**
 
 **Live validation deferred to Phase 4C (by the approved-origin boundary — working as designed):** the
 controlled real-Stream **no-clobber proof** and the **connected browser-path validation** (valid-session
@@ -1334,11 +1334,52 @@ and recoverable from git**, and the **legacy token Worker (`mhms-chat-token`) re
 — so a cutover can be reverted by restoring the prior root bundle (and the app continues to function on
 the legacy Worker). The branch's rebuilt bundle is intentionally **not** published.
 
-**Remaining after 4B2 → Phase 4C** (production bundle publish/cutover to the approved origin, then the
-deferred real-Stream proof + connected browser validation + Squarespace-iframe validation + device matrix
-incl. Safari + the session-expiry runtime trigger, then a stabilization window before any legacy-Worker
-retirement). Peer-message `instructor` remains **legacy/client-writable debt**, Stream permissions are
-**not server-enforced**, and **Phase 4C is not started.**
+**Remaining after 4B2 → Phase 4C:** the production bundle publish/cutover to the approved origin and the
+deferred real-Stream proof + connected browser validation — **all now COMPLETE (see the next section).**
+
+### Phase 4C — production cutover (COMPLETE — 2026-08-04; stabilization in progress)
+
+The verified-auth bundle is **cut over and live** at the approved origin `https://chat.mentalhealthmadesimple.life`.
+Production no longer uses the legacy "browser supplies any user_id" flow for identity; it requires a
+verified email session (`/token`), and Stream connects with `{ id }` only (no profile clobber).
+
+**Release facts**
+- Cutover merge commit (PR #23 → `main`): `4fa562f2fec6718bbdadb93f948d2065104e34fb`
+- Live production `chat.bundle.js` SHA-256: `9c7fbc64ccbc10c72396079ff7ccc9b103ee417d7402e7afaa20e6127d2b703b`
+- Rollback bundle SHA-256 (prior production, recoverable from git): `09380247098d05875d891aeb25c64311f460192ae48d00234d6e056f3a039961`
+- Rollback target: `git revert 4fa562f2…` restores the prior root bundle; the app also still runs on the legacy Worker.
+
+**Supervised live validation at the approved origin — all PASSED:**
+- Verified-auth flow: request code → verify → `/token` (canonical userId + literal instructor boolean).
+- Real-Stream **no-clobber proof**: name/bio/link/color/image/profile_version all **unchanged** after a
+  `{id}`-only reconnect (connectVerified sends `{ id }` only; a legacy-created profile survived intact).
+- Session restoration (refresh → community, no re-verify, no ProfileForm flash).
+- Existing-profile routing → community; currentUser rebuilt from the authoritative Stream profile + the
+  `/token` instructor claim (the client-writable Stream `instructor` field is not trusted).
+- Edit Profile uses **Stream values only** (no stale `cats_profile` hints; no email field).
+- Community: channels, real message history, channel switching, unread/mention init, thread recovery,
+  Welcome Card; Welcome Back correctly suppressed for a first-visit device; Featured Updates resolves
+  without blocking.
+- Instructor gating matches the `/token` claim (Announcements posting enabled for the instructor identity).
+- Logout: truthful **signOutError** on a `/logout` transport fault (does not claim sign-out succeeded) →
+  **Retry** → success → entryChoice; refresh does not restore the logged-out session.
+- Listener counts stable across reconnect (no duplication); listeners torn down on logout.
+- Desktop + mobile ATLAS experience.
+- **Squarespace iframe** (`www.mentalhealthmadesimple.life/catscourse#community`), validated by Jonathan:
+  the authenticated session carries into the iframe; community renders without a second login; sign-out
+  clears the session everywhere; the logged-out iframe shows the ATLAS entry experience; desktop layout
+  renders inside the iframe; not blank/clipped/broken; logout consistent across direct and embedded apps.
+
+**Stabilization window (48–72 h, started 2026-08-04):** the legacy Worker (`mhms-chat-token`) **remains
+live** and the **rollback bundle remains recoverable** (artifacts retained). Watch for auth/profile/iframe/
+Stream issues. During stabilization, do **not** retire the legacy Worker, remove the prior bundle, begin
+profile-photo work, or retire legacy identity code. Legacy-Worker retirement requires successful
+stabilization + separate review + a documentation update.
+
+**Open items (non-blocking; tracked in `TECHNICAL_DEBT.md`):** Safari + full device matrix (validate during
+stabilization); Sign-out control discoverability; missing Edit-Profile cancel control; session-expiry
+runtime trigger (deferred hardening). Peer-message `instructor` remains **legacy/client-writable debt** and
+Stream role/channel permissions are **not server-enforced**.
 
 ## QA SAFETY GUARDRAILS (required for all QA work)
 
