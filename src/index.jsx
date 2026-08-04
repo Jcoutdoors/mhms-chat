@@ -29,18 +29,11 @@ import {
   STATIC_CHANNELS,
   CHANNEL_GROUPS,
   getLiveChannelDefs,
-  retainConfiguredChannels,
   isConfiguredProductionChannelId,
 } from './channelConfig';
-// v63.1 Featured Updates: deterministic retrieval/processing helpers + acknowledgment store.
-import {
-  validateFeaturedUpdatesConfig,
-  createFeaturedAckStore,
-  isChannelAccessibleToUser,
-  buildFeaturedSearchFilter,
-  assembleFeaturedItems,
-  relativeDate as featuredRelativeDate,
-} from './featuredUpdates';
+// v63.1 Featured Updates: retrieval/ack helpers now live in the runtime; index only needs
+// the display helper. (relativeDate is used by the Welcome Back / Featured rendering.)
+import { relativeDate as featuredRelativeDate } from './featuredUpdates';
 // VIF Phase 4B2 — verified-auth wiring. The controller owns the auth state machine and
 // the Stream client lifecycle; App is a thin binding. Identity (canonical userId), the
 // Stream token, and the instructor claim ALL come from the auth service (/token) — never
@@ -51,11 +44,11 @@ import { createAuthController } from './authController';
 import { getToken, requestCode, verifyCode, logout as authLogout } from './authClient';
 import { connectVerified, disconnectVerified, saveProfile as streamSaveProfile, readStreamProfile } from './streamConnect';
 import { remainingSeconds } from './cooldown';
-import { createListenerBag } from './listenerBag';
 import { AuthGate, AuthLoading, SignOutError } from './authComponents';
 import { MHMS_ORG_CONFIG } from './orgConfig';
 import { readLegacyUiHints } from './legacyStorage';
 import { profileFormInitial } from './profileForm';
+import { usePlatformRuntime } from './platformRuntime';
 
 // Load emoji-mart from CDN at runtime
 let emojiMartPromise = null;
@@ -223,15 +216,6 @@ function upsertThreadNote(setThreadNotes, note) {
         ...note,
       },
     };
-  });
-}
-
-function removeThreadNote(setThreadNotes, threadId) {
-  setThreadNotes(prev => {
-    if (!prev[threadId]) return prev;
-    const next = { ...prev };
-    delete next[threadId];
-    return next;
   });
 }
 
@@ -1310,24 +1294,11 @@ function ThreadJumpHandler({
 
         if (cancelled) return;
 
+        // Stage 1: PlatformRuntime is the sole owner of thread-note reconciliation and the
+        // thread-level markRead for a noted thread (ActiveThreadWatcher reports the opened
+        // thread -> runtime.activeThreadChanged -> the runtime removes the matching note and
+        // marks it read exactly once). This handler only resolves the pending jump.
         onOpened(pendingThread.threadId);
-
-        try {
-          await channel.markRead({
-            thread_id: pendingThread.threadId,
-          });
-
-          console.log(
-            '[CATS THREAD DIAG] thread marked read',
-            pendingThread.threadId
-          );
-        } catch (e) {
-          console.warn(
-            '[CATS THREAD DIAG] markRead failed',
-            pendingThread.threadId,
-            e.message
-          );
-        }
       } catch (e) {
         if (cancelled) return;
 
@@ -1425,26 +1396,16 @@ function FeaturedUpdateJumpHandler({ pendingFeatured, activeId, channel, onDone,
 // reply-count click (useOpenThreadHandler -> openThread). Watching it here
 // means the notification-clearing logic works for both paths without
 // attaching a separate handler to every message or reply-count control.
-function ActiveThreadWatcher({ setThreadNotes, setOpenThreadId, threadNotesRef, channel }) {
+// Stage 1: reporter of active-thread identity only. It reads the open thread from Stream's
+// channel context and reports it to the runtime; PlatformRuntime owns openThreadId, matching
+// thread-note removal, and the thread markRead (only when a matching unread note existed).
+function ActiveThreadWatcher({ onActiveThreadChanged, channel }) {
   const { thread } = useChannelStateContext('ActiveThreadWatcher');
   const threadId = thread ? thread.id : null;
 
   useEffect(() => {
-    setOpenThreadId(threadId);
-
-    if (threadId && threadNotesRef.current[threadId]) {
-      removeThreadNote(setThreadNotes, threadId);
-
-      if (channel) {
-        channel.markRead({ thread_id: threadId }).catch(e => {
-          console.warn(
-            '[CATS THREAD DIAG] markRead (native open) failed',
-            e.message
-          );
-        });
-      }
-    }
-  }, [threadId, channel, setThreadNotes, setOpenThreadId, threadNotesRef]);
+    onActiveThreadChanged(threadId);
+  }, [threadId, channel, onActiveThreadChanged]);
 
   return null;
 }
@@ -1857,9 +1818,6 @@ function WelcomeBackSummary({ recap, firstName, onSelectChannel, onSelectThread,
 }
 
 function App() {
-  const [chatClient, setChatClient] = useState(null);
-  const [channelMap, setChannelMap] = useState({});
-  const [activeId, setActiveId] = useState(getInitialChannelId);
   const [error, setError] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [showWelcome, setShowWelcome] = useState(false);
@@ -1869,11 +1827,44 @@ function App() {
   const [auth, setAuth] = useState(() => ({ phase: 'booting', entryPath: null, error: null, cooldownDeadline: null, userId: null, instructor: false, user: null }));
   const [resendCooldown, setResendCooldown] = useState(0);
   const orgConfig = MHMS_ORG_CONFIG;
-  // The active generation's listener bag (disposed on stale setup / logout / replacement),
-  // and a ref indirection so the once-created controller always calls the freshest
-  // setupChannels closure without capturing stale App state.
-  const authBagRef = useRef(null);
-  const setupChannelsImplRef = useRef(() => {});
+  const [rosterMembers, setRosterMembers] = useState([]);
+  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth <= 768 : false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [showWelcomeBack, setShowWelcomeBack] = useState(false);
+  useEffect(() => {
+    window.__catsWBTrace = window.__catsWBTrace || [];
+    window.__catsWBTrace.push({ t: Date.now(), showWelcomeBack });
+  }, [showWelcomeBack]);
+
+  // Stage 1: PlatformRuntime owns the persistent connected Community runtime — channel setup,
+  // channel map, active channel, unread/mention state, thread state + reconciliation, Featured
+  // Updates, readiness flags, generation-scoped listeners, and teardown. It stays mounted for the
+  // whole authenticated lifecycle. The auth controller (below) still owns verified auth, the
+  // Stream client lifecycle, the auth generation, and logout, and it INITIATES channel setup via
+  // runtime.setupChannels. No presentation callbacks are passed in (the mobile-drawer close is
+  // composed in the view; see handleChannelSelect).
+  const runtime = usePlatformRuntime({
+    currentUser,
+    authPhase: auth.phase,
+    allChannels: ALL_CHANNELS,
+    getInitialChannelId,
+    canPostAnnouncements,
+    fireMentionAlert,
+    requestNotificationPermission,
+    upsertThreadNote,
+    featuredConfig: ASSISTANT_CONFIG.featuredUpdates,
+  });
+  const {
+    chatClient, channelMap, activeId, unreadCounts, mentionCounts,
+    threadNotes, pendingThread, openThreadId,
+    featuredItems, pendingFeatured, featuredUnavailable,
+    channelUnreadReady, threadRecoveryReady, featuredUpdatesReady,
+  } = runtime;
+  // Ref indirection so the once-created controller always initiates the freshest
+  // runtime.setupChannels without recreating the controller or capturing a stale closure.
+  const runtimeRef = useRef(runtime);
+  runtimeRef.current = runtime;
+
   const controllerRef = useRef(null);
   if (!controllerRef.current) {
     controllerRef.current = createAuthController({
@@ -1883,85 +1874,21 @@ function App() {
       disconnect: (client) => disconnectVerified(client),
       save: (client, userId, data) => streamSaveProfile(client, userId, data),
       readProfile: (client) => readStreamProfile(client),
-      setupChannels: (args) => setupChannelsImplRef.current(args),
+      setupChannels: (args) => runtimeRef.current.setupChannels(args),
       onChange: (snap) => setAuth(snap),
       now: Date.now,
     });
   }
   const controller = controllerRef.current;
-  // Keep the controller pointed at the freshest setupChannels closure (captures the current
-  // render's setters/refs) without recreating the controller. setupChannels is a hoisted
-  // declaration below, so this assignment is valid here.
-  setupChannelsImplRef.current = setupChannels;
-  const [unreadCounts, setUnreadCounts] = useState({});
-  const [mentionCounts, setMentionCounts] = useState({});
-  const [rosterMembers, setRosterMembers] = useState([]);
-  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth <= 768 : false);
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  // Thread reply notifications (v62), live in production.
-  const [threadNotes, setThreadNotes] = useState({});
-  const [pendingThread, setPendingThread] = useState(null);
-  const [openThreadId, setOpenThreadId] = useState(null);
-  // v63.1 Featured Updates navigation: pending jump target and a transient "no longer
-  // available" notice for a target that vanished between assembly and click.
-  const [pendingFeatured, setPendingFeatured] = useState(null);
-  const [featuredUnavailable, setFeaturedUnavailable] = useState(false);
-  // v63 SOURCE CANDIDATE — Welcome Back summary.
-  // Two independent "is this data ready" signals the recap waits on before it may ever
-  // appear. Both fail open (set true even on failure) so a broken data source degrades
-  // the recap rather than blocking chat entirely.
-  const [channelUnreadReady, setChannelUnreadReady] = useState(false);
-  const [threadRecoveryReady, setThreadRecoveryReady] = useState(false);
-  // v63.1 Featured Updates: same settled-state pattern as the two flags above. A failed
-  // retrieval still sets this true (known state reached, "no data") so Welcome Back proceeds
-  // with channel/thread content. featuredItems holds the assembled, unacknowledged-at-
-  // retrieval qualifying items; the ack store (localStorage, or in-memory fallback) persists
-  // which displayed items have been acknowledged.
-  const [featuredUpdatesReady, setFeaturedUpdatesReady] = useState(false);
-  const [featuredItems, setFeaturedItems] = useState([]);
-  const featuredAckStoreRef = useRef(null);
-  const [showWelcomeBack, setShowWelcomeBack] = useState(false);
-  useEffect(() => {
-    window.__catsWBTrace = window.__catsWBTrace || [];
-    window.__catsWBTrace.push({ t: Date.now(), showWelcomeBack });
-  }, [showWelcomeBack]);
-  const clientRef = useRef(null);
-  const activeIdRef = useRef(activeId);
-  useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
-  const openThreadIdRef = useRef(null);
-  useEffect(() => {
-    openThreadIdRef.current = openThreadId;
-  }, [openThreadId]);
 
-  // v62 SOURCE CANDIDATE — correction. Lets ActiveThreadWatcher read the
-  // latest threadNotes without needing it in its effect dependency array.
-  const threadNotesRef = useRef({});
-  useEffect(() => {
-    threadNotesRef.current = threadNotes;
-  }, [threadNotes]);
-
-  // v63 SOURCE CANDIDATE — Welcome Back summary.
-  // Snapshots currentUser.welcomed the FIRST time currentUser is known this page load,
-  // before dismissWelcome() could flip it to true later in this same session. Read-only
-  // use of the existing flag; does not change how or when it's written. This is what
-  // stops a brand-new user from being told "welcome back" moments after finishing their
-  // first WelcomeCard in the same visit.
+  // v63 SOURCE CANDIDATE — Welcome Back: snapshot currentUser.welcomed the FIRST time currentUser
+  // is known this page load, before dismissWelcome() flips it later in the same session.
   const wasReturningUserRef = useRef(null);
   useEffect(() => {
     if (wasReturningUserRef.current === null && currentUser) {
       wasReturningUserRef.current = !!currentUser.welcomed;
     }
   }, [currentUser]);
-
-  // VIF Phase 4B2: all Stream listeners (message.new, notification.message_new, thread
-  // replies, connection.recovered) are now registered through the active generation's
-  // listenerBag (authBagRef), which setupChannels disposes on client replacement/retry and
-  // the phase effect disposes on logout/teardown. On unmount we dispose whatever is live.
-  useEffect(() => {
-    return () => {
-      if (authBagRef.current) { authBagRef.current.dispose(); authBagRef.current = null; }
-    };
-  }, []);
 
   useEffect(() => {
     function onResize() { setIsMobile(window.innerWidth <= 768); }
@@ -2004,543 +1931,17 @@ function App() {
     return () => { if (iv) clearInterval(iv); };
   }, [auth.cooldownDeadline]);
 
-  // Dispose the active generation's Stream listeners whenever we leave the connected states
-  // (logout, sign-out error, service error, session end). The controller has already
-  // disconnected Stream; this ensures no JS listeners linger. setupChannels also disposes
-  // the prior bag on client replacement/retry, so this is the logout/teardown counterpart.
-  useEffect(() => {
-    const connectedPhases = ['loadingProfile', 'profileSetup', 'savingProfile', 'community'];
-    if (!connectedPhases.includes(auth.phase)) {
-      if (authBagRef.current) { authBagRef.current.dispose(); authBagRef.current = null; }
-      if (clientRef.current) clientRef.current = null;
-      setChatClient((c) => (c ? null : c));
-      setChannelMap((m) => (Object.keys(m).length ? {} : m));
-    }
-  }, [auth.phase]);
-
-  // VIF Phase 4B2 — generation-aware post-connect channel setup. The controller has ALREADY
-  // connected `client` via connectVerified ({ id } only — no profile clobber, no token here)
-  // and invokes this as setupChannels({ client, userId, user, isCurrent }). We consult
-  // isCurrent() before every network stage, after each await, and before every App-state
-  // mutation or listener registration; if the operation goes stale (logout / client
-  // replacement / retry) we dispose exactly the listeners we registered and commit nothing
-  // more. All Stream listeners are registered through `bag` so they can be disposed together.
-  async function setupChannels({ client, userId, user, isCurrent }) {
-    // Dispose any prior generation's listeners first (retry / client replacement) so we never
-    // leave stale listeners attached or register duplicates for a new connection.
-    if (authBagRef.current) { authBagRef.current.dispose(); authBagRef.current = null; }
-    const bag = createListenerBag();
-    authBagRef.current = bag;
-    // Internal alias so the existing body (which reads profile.id / profile.name) is unchanged.
-    const profile = (user && user.id) ? user : { id: userId };
+  // Stage 1: the connected runtime owns channel setup/teardown, ensure/select, thread state,
+  // Featured retrieval, and all connected listeners (see usePlatformRuntime). Channel selection
+  // is composed here so the mobile-drawer close (App-owned presentation) stays out of the runtime.
+  const handleChannelSelect = async (id) => {
     try {
-      if (!isCurrent()) { bag.dispose(); return; }
-      clientRef.current = client;
-
-      const initialId = getInitialChannelId();
-      const initialChDef = ALL_CHANNELS.find(c => c.id === initialId) || ALL_CHANNELS.find(c => c.id === 'cats-general');
-
-      // OPTION A architecture (persistent unread/mention fix):
-      // Watching a channel makes you a "present watcher", and Stream's server then
-      // auto-advances your read pointer when a message arrives there, which wipes unread
-      // mentions. So we DON'T watch every channel. Instead:
-      //   1. queryChannels with watch:false loads all channels' state + read data and
-      //      establishes membership, WITHOUT making us a present watcher (so unread
-      //      mentions persist across sessions).
-      //   2. We watch ONLY the active channel (read-on-receipt there is correct, you're
-      //      viewing it).
-      //   3. Live badges/sounds for non-active channels come from notification.message_new
-      //      (fires for member channels you are not watching).
-      const allIds = ALL_CHANNELS.map(c => c.id);
-      const map = {};
-      try {
-        const queried = await client.queryChannels(
-          { type: 'messaging', id: { $in: allIds } },
-          { last_message_at: -1 },
-          { watch: false, state: true, presence: false, limit: 30 }
-        );
-        // The query above is already constrained to an explicit ID allowlist, so in normal
-        // operation this removes nothing. It enforces the same invariant client-side as
-        // defense in depth, and it is the shared helper the QA invisibility tests exercise,
-        // so those tests prove THIS path rather than a parallel copy of the logic.
-        retainConfiguredChannels(queried).forEach(ch => { map[ch.id] = ch; });
-      } catch (e) {
-        // fall through; we'll at least set up the active channel below
-      }
-      if (!isCurrent()) { bag.dispose(); return; } // after the queryChannels await
-
-      // Ensure every cohort channel exists in the map AND the user is a member (membership
-      // is what makes notification.message_new fire for channels they aren't watching).
-      for (const chDef of ALL_CHANNELS) {
-        let ch = map[chDef.id];
-        if (!ch) {
-          ch = client.channel('messaging', chDef.id, { name: chDef.name, members: [profile.id] });
-          map[chDef.id] = ch;
-        }
-        // Add self as member if not already one (no-op if already a member).
-        const isMember = ch.state && ch.state.members && ch.state.members[profile.id];
-        if (!isMember) {
-          try { await ch.addMembers([profile.id]); } catch (e) {}
-          if (!isCurrent()) { bag.dispose(); return; } // after each membership mutation
-        }
-      }
-
-      // Watch ONLY the active channel (live message.new + presence for who's-online there).
-      try {
-        const activeCh = map[initialChDef.id] || client.channel('messaging', initialChDef.id, { name: initialChDef.name, members: [profile.id] });
-        await activeCh.watch({ presence: true });
-        map[initialChDef.id] = activeCh;
-      } catch (e) {}
-      if (!isCurrent()) { bag.dispose(); return; } // after the watch await, before committing App state
-
-      setChatClient(client);
-      setChannelMap(map);
-      setActiveId(initialChDef.id);
-
-      // Seed badges from Stream's server-side read state, so users see everything they
-      // missed since their LAST session, not just messages that arrive while connected.
-      // countUnread()/countUnreadMentions() require read_events enabled on the channel type.
-      try {
-        const seededUnread = {};
-        const seededMentions = {};
-        ALL_CHANNELS.forEach((chDef) => {
-          const ch = map[chDef.id];
-          if (!ch) return;
-          const u = ch.countUnread();
-          const m = ch.countUnreadMentions();
-          if (u > 0 || m > 0) {
-            console.log('[CATS DIAG seed]', chDef.id, '| unread:', u, '| mentions:', m);
-          }
-          if (u > 0) seededUnread[chDef.id] = u;
-          if (m > 0) seededMentions[chDef.id] = m;
-        });
-        console.log('[CATS DIAG seed] result -> unread:', JSON.stringify(seededUnread), '| mentions:', JSON.stringify(seededMentions));
-        // Don't show a badge on the channel we're landing in; mark it read instead.
-        delete seededUnread[initialChDef.id];
-        delete seededMentions[initialChDef.id];
-        if (!isCurrent()) { bag.dispose(); return; } // before committing unread/mention state
-        setUnreadCounts(seededUnread);
-        setMentionCounts(seededMentions);
-        if (map[initialChDef.id]) { try { await map[initialChDef.id].markRead(); } catch (e) {} }
-      } catch (e) {
-        // if read state isn't available, fall back to live-only counting
-      }
-      if (!isCurrent()) { bag.dispose(); return; }
-      // v63 SOURCE CANDIDATE: channel unread data has reached a known state (success or
-      // fallback) either way, so the Welcome Back recap may now safely read unreadCounts.
-      setChannelUnreadReady(true);
-
-      const detectAndAlert = (event, channelLabelMap) => {
-        if (!isCurrent()) return; // stale generation: ignore late events
-        const chId = event.channel_id || event.cid?.replace('messaging:', '');
-        if (!chId) return;
-        const msg = event.message || {};
-        const text = msg.text || '';
-        const lower = text.toLowerCase();
-        const senderId = msg.user?.id || '';
-        const senderName = msg.user?.name || 'Someone';
-        const myId = profile.id;
-        const myName = (profile.name || '').toLowerCase();
-        const myFirst = myName.split(' ')[0];
-        if (senderId === myId) return; // don't alert on your own messages
-
-        // If the message lands in the channel the user is currently viewing, mark it read
-        // on Stream instead of badging it.
-        if (chId === activeIdRef.current) {
-          const ch = clientRef.current && clientRef.current.activeChannels
-            ? clientRef.current.activeChannels['messaging:' + chId] : null;
-          if (ch && ch.markRead) { try { ch.markRead(); } catch (e) {} }
-          return;
-        }
-
-        // Did this message mention me, or @everyone from an instructor?
-        const mentionedMe = (myFirst && lower.includes('@' + myFirst)) || (myName && lower.includes('@' + myName));
-        const everyoneByInstructor = lower.includes('@everyone') && canPostAnnouncements(msg.user);
-        const isMention = mentionedMe || everyoneByInstructor;
-
-        setUnreadCounts(prev => ({ ...prev, [chId]: (prev[chId] || 0) + 1 }));
-        if (isMention) {
-          setMentionCounts(prev => ({ ...prev, [chId]: (prev[chId] || 0) + 1 }));
-          const chName = (ALL_CHANNELS.find(c => c.id === chId) || {}).name || 'the chat';
-          fireMentionAlert(`${senderName} mentioned you`, `In ${chName}: ${text.slice(0, 120)}`);
-        }
-      };
-
-      if (!isCurrent()) { bag.dispose(); return; } // before registering any listener
-      { const s = client.on('message.new', event => detectAndAlert(event)); bag.add(() => s.unsubscribe()); }
-      { const s = client.on('notification.message_new', event => detectAndAlert(event)); bag.add(() => s.unsubscribe()); }
-      requestNotificationPermission();
-
-      // v62 SOURCE CANDIDATE — thread reply notifications. Registered through the bag so a
-      // stale generation (logout / replacement) disposes them with everything else.
-      const handleThreadReply = async event => {
-        if (!isCurrent()) return; // stale generation: ignore late thread events
-        console.log(
-          '[CATS THREAD DIAG] notification.thread_message_new received',
-          {
-            keys: Object.keys(event || {}),
-            channel_id: event.channel_id,
-            cid: event.cid,
-            parent_id: event.message?.parent_id,
-            replier: event.message?.user?.id,
-          }
-        );
-
-        const reply = event.message || {};
-        const parentId = reply.parent_id;
-
-        if (!parentId) {
-          console.warn(
-            '[CATS THREAD DIAG] no parent_id on event, skipping'
-          );
-          return;
-        }
-
-        const replierId = reply.user?.id;
-
-        if (!replierId || replierId === profile.id) {
-          console.log('[CATS THREAD DIAG] rejected: own reply');
-          return;
-        }
-
-        const channelId =
-          event.channel_id ||
-          (event.cid || '').replace('messaging:', '');
-
-        if (!channelId) {
-          console.warn(
-            '[CATS THREAD DIAG] no channel ID on event, skipping'
-          );
-          return;
-        }
-
-        try {
-          const probe = clientRef.current.channel(
-            'messaging',
-            channelId
-          );
-
-          const response = await probe.getMessagesById([parentId]);
-
-          const parent =
-            response &&
-            response.messages &&
-            response.messages[0];
-
-          if (!parent) {
-            console.warn(
-              '[CATS THREAD DIAG] parent lookup returned no message',
-              parentId
-            );
-            return;
-          }
-
-          if (parent.user?.id !== profile.id) {
-            console.log(
-              '[CATS THREAD DIAG] rejected: not my thread',
-              {
-                parentAuthor: parent.user?.id,
-              }
-            );
-            return;
-          }
-
-          console.log(
-            '[CATS THREAD DIAG] accepted: notifying',
-            {
-              threadId: parentId,
-              channelId,
-            }
-          );
-
-          upsertThreadNote(setThreadNotes, {
-            threadId: parentId,
-            channelId,
-            replierName: reply.user?.name || 'Someone',
-            replierId,
-            preview: (reply.text || '').slice(0, 120),
-            // v63 SOURCE CANDIDATE: the reply's own message id, used as the stable
-            // identity anchor for the Welcome Back recap signature (not display data).
-            latestReplyId: reply.id || null,
-            createdAt:
-              reply.created_at ||
-              new Date().toISOString(),
-          });
-
-          if (openThreadIdRef.current !== parentId) {
-            const channelName =
-              (
-                ALL_CHANNELS.find(
-                  channel => channel.id === channelId
-                ) || {}
-              ).name || 'the chat';
-
-            fireMentionAlert(
-              `${reply.user?.name || 'Someone'} replied to your thread`,
-              `In ${channelName}: ${(reply.text || '').slice(0, 120)}`
-            );
-          }
-        } catch (e) {
-          console.warn(
-            '[CATS THREAD DIAG] parent lookup failed',
-            e.message
-          );
-        }
-      };
-
-      const threadReplySubscription = client.on(
-        'notification.thread_message_new',
-        handleThreadReply
-      );
-
-      bag.add(() => threadReplySubscription.unsubscribe());
-
-      // Persisted reconciliation.
-      //
-      // queryThreads() returns Thread objects. Thread state is read through
-      // thread.state.getLatestValue(). Direct getters such as thread.id,
-      // thread.channel, and thread.ownUnreadCount must be verified against the
-      // installed stream-chat version before this hunk is accepted.
-      //
-      // watch:false is passed explicitly so queryThreads() does not expand the
-      // application's one-watched-channel architecture.
-      const reconcileThreads = async trigger => {
-        try {
-          const result = await client.queryThreads({
-            watch: false,
-            limit: 30,
-            participant_limit: 10,
-            reply_limit: 1,
-          });
-
-          const threads = result.threads || [];
-
-          console.log(
-            '[CATS THREAD DIAG] queryThreads result',
-            {
-              trigger,
-              count: threads.length,
-            }
-          );
-
-          threads.forEach(thread => {
-            const unread = thread.ownUnreadCount;
-
-            if (!unread) return;
-
-            const state = thread.state.getLatestValue();
-            const parentUserId =
-              state.parentMessage?.user?.id;
-
-            if (parentUserId !== profile.id) {
-              return;
-            }
-
-            const lastReply =
-              state.replies && state.replies.length
-                ? state.replies[state.replies.length - 1]
-                : null;
-
-            const channelObject = thread.channel;
-
-            const channelId = channelObject
-              ? (
-                  channelObject.id ||
-                  (channelObject.cid || '').replace(
-                    'messaging:',
-                    ''
-                  )
-                )
-              : null;
-
-            if (!channelId) {
-              console.warn(
-                '[CATS THREAD DIAG] queryThreads thread missing channel ID',
-                thread.id
-              );
-              return;
-            }
-
-            console.log(
-              '[CATS THREAD DIAG] queryThreads reconciled unread thread',
-              {
-                threadId: thread.id,
-                channelId,
-                unread,
-              }
-            );
-
-            if (!isCurrent()) return; // stale generation: do not mutate thread state
-            upsertThreadNote(setThreadNotes, {
-              threadId: thread.id,
-              channelId,
-              replierName:
-                lastReply?.user?.name || 'Someone',
-              replierId: lastReply?.user?.id,
-              preview: (lastReply?.text || '').slice(
-                0,
-                120
-              ),
-              // v63 SOURCE CANDIDATE: same identity anchor as the live-event path above.
-              latestReplyId: lastReply?.id || null,
-              createdAt:
-                state.updatedAt ||
-                new Date().toISOString(),
-            });
-          });
-        } catch (e) {
-          console.warn(
-            '[CATS THREAD DIAG] queryThreads reconciliation failed',
-            trigger,
-            e.message
-          );
-        }
-      };
-
-      // v63 SOURCE CANDIDATE: reconcileThreads is intentionally not awaited here (matches
-      // the existing fire-and-forget v62 behavior), but .finally() marks thread recovery
-      // "settled" either way so the Welcome Back recap knows when it may safely read
-      // threadNotes, without ever blocking the rest of setup or the chat UI on it. Guarded so
-      // a stale generation never flips the ready flag or mutates state.
-      reconcileThreads('initial-connect').finally(() => { if (isCurrent()) setThreadRecoveryReady(true); });
-
-      const recoveredSubscription = client.on(
-        'connection.recovered',
-        () => { if (isCurrent()) reconcileThreads('connection.recovered'); }
-      );
-
-      bag.add(() => recoveredSubscription.unsubscribe());
-
-      // v63.1 Featured Updates retrieval — same fire-and-forget, settle-either-way pattern as
-      // reconcileThreads. `map` here already has membership ensured by the addMembers loop
-      // above, so the access check sees the loaded, member channel. isCurrent is threaded in
-      // so a stale generation neither sets featuredItems nor flips the ready flag.
-      retrieveFeaturedUpdates(client, map, profile, isCurrent).finally(() => { if (isCurrent()) setFeaturedUpdatesReady(true); });
-    } catch (e) {
-      // A genuinely unexpected setup failure: dispose our listeners and propagate so the
-      // controller routes to serviceError (rather than leaving a half-built chat).
-      if (authBagRef.current === bag) { bag.dispose(); authBagRef.current = null; }
-      throw e;
+      await runtime.selectChannel(id);
+    } finally {
+      setMobileNavOpen(false);
     }
-  }
-
-  async function ensureChannel(id) {
-    const chDef = ALL_CHANNELS.find(c => c.id === id);
-    if (!chDef || !clientRef.current) return channelMap[id] || null;
-    let channel = channelMap[id];
-    if (!channel) {
-      channel = clientRef.current.channel('messaging', chDef.id, { name: chDef.name, members: [currentUser.id] });
-      setChannelMap(prev => ({ ...prev, [id]: channel }));
-    }
-    // Always ensure the channel we're opening is actively WATCHED (so live messages,
-    // including your own, appear in real time). Channels loaded at login via queryChannels
-    // are NOT watched, so opening one must watch it now.
-    try { await channel.watch({ presence: true }); } catch (e) {}
-    return channel;
-  }
-
-  async function handleChannelSelect(id) {
-    const prevId = activeIdRef.current;
-    setActiveId(id);
-    setMobileNavOpen(false);
-    setUnreadCounts(prev => ({ ...prev, [id]: 0 }));
-    setMentionCounts(prev => ({ ...prev, [id]: 0 }));
-    if (STATIC_CHANNELS.includes(id)) return;
-    const ch = await ensureChannel(id);
-    // Persist the read state to Stream so the cleared badge sticks across sessions/devices.
-    if (ch) { try { await ch.markRead(); } catch (e) {} }
-    // Stop watching the previously-active channel, so only the active channel is watched.
-    // (Watching a channel makes Stream auto-advance read state on message arrival, which
-    // would wipe unread mentions there. Keeping only the active channel watched preserves
-    // unread/mention persistence everywhere else.)
-    if (prevId && prevId !== id && !STATIC_CHANNELS.includes(prevId)) {
-      const prevCh = channelMap[prevId];
-      if (prevCh && prevCh.stopWatching) { try { await prevCh.stopWatching(); } catch (e) {} }
-    }
-  }
-
-  // v62 SOURCE CANDIDATE.
-  // Reuses handleChannelSelect so the previous watched channel is stopped and
-  // only the selected channel becomes active.
-  function handleThreadNoteClick(note) {
-    if (note.channelId !== activeId) {
-      handleChannelSelect(note.channelId);
-    }
-
-    setPendingThread({
-      channelId: note.channelId,
-      threadId: note.threadId,
-    });
-  }
-
-  // v63.1 Featured Updates — acknowledgment store accessor.
-  // Created once per page load. Reads window.localStorage; if that access itself throws
-  // (Case B), the store transparently uses an in-memory page-session fallback.
-  function getFeaturedAckStore() {
-    if (!featuredAckStoreRef.current) {
-      let storage = null;
-      try { storage = window.localStorage; } catch (e) { storage = null; }
-      featuredAckStoreRef.current = createFeaturedAckStore({
-        storage,
-        lookbackDays: ASSISTANT_CONFIG.featuredUpdates && ASSISTANT_CONFIG.featuredUpdates.lookbackDays,
-        warn: msg => console.warn('[CATS FEATURED]', msg),
-      });
-    }
-    return featuredAckStoreRef.current;
-  }
-
-  // v63.1 Featured Updates — retrieval. One bounded channel.search() per configured source
-  // channel, filtered server-side by author, 7-day horizon, and top-level-only. Failures are
-  // isolated per channel; a total failure yields an empty list, and the caller always marks
-  // featuredUpdatesReady true afterwards so Welcome Back proceeds with channel/thread content.
-  async function retrieveFeaturedUpdates(client, map, profile, isCurrent = () => true) {
-    const cfg = ASSISTANT_CONFIG.featuredUpdates;
-    const check = validateFeaturedUpdatesConfig(cfg, isConfiguredProductionChannelId);
-    if (!check.ok) {
-      if (check.invalid) console.warn('[CATS FEATURED] section disabled, invalid config:', check.reason);
-      if (isCurrent()) setFeaturedItems([]);
-      return;
-    }
-    const store = getFeaturedAckStore();
-    const sinceISO = new Date(Date.now() - cfg.lookbackDays * 24 * 60 * 60 * 1000).toISOString();
-    const filter = buildFeaturedSearchFilter(cfg.authorIds, sinceISO);
-
-    const channelResults = [];
-    for (const channelId of cfg.sourceChannelIds) {
-      // Never widen scope: a source channel must be in the shared production configuration
-      // AND accessible to this user through the loaded channel map (the same path the app
-      // itself uses), not merely listed in sourceChannelIds.
-      if (!isConfiguredProductionChannelId(channelId)) continue;
-      if (!isChannelAccessibleToUser(map, channelId, profile.id)) {
-        console.warn('[CATS FEATURED] source channel not accessible via loaded path, skipping:', channelId);
-        continue;
-      }
-      try {
-        const resp = await map[channelId].search(filter, {
-          limit: cfg.maxItems,
-          sort: [{ created_at: -1 }],
-        });
-        const messages = (resp.results || []).map(r => r.message || r);
-        const chDef = ALL_CHANNELS.find(c => c.id === channelId);
-        channelResults.push({ channelId, channelName: (chDef && chDef.name) || channelId, messages });
-      } catch (e) {
-        // Isolate: this source contributes nothing; the section still assembles from others.
-        console.warn('[CATS FEATURED] source channel query failed, omitting:', channelId, e.message);
-      }
-    }
-
-    let items = [];
-    try {
-      items = assembleFeaturedItems(channelResults, cfg, {
-        isAcknowledged: id => store.isAcknowledged(id),
-        nowMs: Date.now(),
-      });
-    } catch (e) {
-      console.warn('[CATS FEATURED] assembly failed:', e.message);
-      items = [];
-    }
-    if (isCurrent()) setFeaturedItems(items);
-  }
+  };
+  const handleThreadNoteClick = (note) => runtime.openThreadTarget(note);
 
   // v63 SOURCE CANDIDATE — Welcome Back summary.
   //
@@ -2595,8 +1996,7 @@ function App() {
     // acknowledgment prevents the shrink-reopen.
     let featuredRecapItems = [];
     try {
-      const store = getFeaturedAckStore();
-      featuredRecapItems = (featuredItems || []).filter(it => !store.isAcknowledged(it.messageId));
+      featuredRecapItems = (featuredItems || []).filter(it => !runtime.isFeaturedAcknowledged(it.messageId));
     } catch (e) {
       featuredRecapItems = [];
     }
@@ -2664,7 +2064,7 @@ function App() {
     try {
       const shown = welcomeBackRecap && welcomeBackRecap.featuredItems;
       if (shown && shown.length) {
-        getFeaturedAckStore().acknowledge(shown.map(it => it.messageId));
+        runtime.acknowledgeFeatured(shown.map(it => it.messageId));
       }
     } catch (e) {
       console.warn('[CATS FEATURED] acknowledge on close failed', e.message);
@@ -2716,41 +2116,15 @@ function App() {
     handleThreadNoteClick({ channelId: threadItem.channelId, threadId: threadItem.threadId });
   }
 
-  // v63.1 Featured Updates navigation: activate the correct channel (normal navigation),
-  // then set a pending jump so FeaturedUpdateJumpHandler scrolls to + highlights the post
-  // once the channel is active. Reuses handleChannelSelect; adds no second nav framework.
+  // v63.1 Featured Updates navigation: the runtime activates the channel and queues the jump
+  // (openFeaturedTarget also clears any stale "unavailable" notice). FeaturedUpdateJumpHandler
+  // then scrolls to + highlights the post. The Featured "unavailable" auto-clear and the
+  // active-channel badge-clear are now owned by the runtime.
   function handleWelcomeBackFeaturedClick(item) {
     acknowledgeDisplayedFeatured();
     setShowWelcomeBack(false);
-    setFeaturedUnavailable(false);
-    if (item.channelId !== activeId) {
-      handleChannelSelect(item.channelId);
-    }
-    setPendingFeatured({ channelId: item.channelId, messageId: item.messageId });
+    runtime.openFeaturedTarget(item);
   }
-
-  function handleFeaturedJumpDone() {
-    setPendingFeatured(null);
-  }
-
-  function handleFeaturedJumpUnavailable() {
-    setPendingFeatured(null);
-    setFeaturedUnavailable(true);
-  }
-
-  // Auto-clear the transient "no longer available" notice.
-  useEffect(() => {
-    if (!featuredUnavailable) return;
-    const t = setTimeout(() => setFeaturedUnavailable(false), 4500);
-    return () => clearTimeout(t);
-  }, [featuredUnavailable]);
-
-  useEffect(() => {
-    if (activeId) {
-      setUnreadCounts(prev => ({ ...prev, [activeId]: 0 }));
-      setMentionCounts(prev => ({ ...prev, [activeId]: 0 }));
-    }
-  }, [activeId]);
 
   // Keep a roster of members for the mention autocomplete.
   useEffect(() => {
@@ -2992,7 +2366,7 @@ function App() {
               ThreadHeader={threadHeaderProps => (
                 <CatsThreadHeader
                   {...threadHeaderProps}
-                  onClose={() => setOpenThreadId(null)}
+                  onClose={() => runtime.activeThreadChanged(null)}
                 />
               )}
             >
@@ -3078,23 +2452,19 @@ function App() {
                 activeId={activeId}
                 channel={activeChannel}
                 onOpened={() => {
-                  // Notification clearing and openThreadId are now handled
-                  // centrally by ActiveThreadWatcher for both bell-driven and
-                  // native thread opens. This callback only needs to clear the
-                  // pending cross-channel jump state.
-                  setPendingThread(null);
+                  // The runtime owns openThreadId + note reconciliation via activeThreadChanged;
+                  // both terminal outcomes only resolve the pending cross-channel jump.
+                  runtime.resolveThreadJump();
                 }}
                 onFailed={() => {
-                  // Leave the bell notification intact so the user can retry.
-                  // Clear only the pending automatic jump to prevent a retry loop.
-                  setPendingThread(null);
+                  // Leave the bell notification intact so the user can retry; clear only the
+                  // pending automatic jump to prevent a retry loop.
+                  runtime.resolveThreadJump();
                 }}
               />
 
               <ActiveThreadWatcher
-                setThreadNotes={setThreadNotes}
-                setOpenThreadId={setOpenThreadId}
-                threadNotesRef={threadNotesRef}
+                onActiveThreadChanged={runtime.activeThreadChanged}
                 channel={activeChannel}
               />
 
@@ -3102,8 +2472,8 @@ function App() {
                 pendingFeatured={pendingFeatured}
                 activeId={activeId}
                 channel={activeChannel}
-                onDone={handleFeaturedJumpDone}
-                onUnavailable={handleFeaturedJumpUnavailable}
+                onDone={runtime.completeFeaturedJump}
+                onUnavailable={runtime.markFeaturedUnavailable}
               />
             </Channel>
           </Chat>
