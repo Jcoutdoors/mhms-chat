@@ -31,6 +31,21 @@ const { createListenerBag } = require('./listenerBag');
 // this set (logout, sign-out error, service error, session end) tears the runtime down.
 const CONNECTED_PHASES = ['loadingProfile', 'profileSetup', 'savingProfile', 'community'];
 
+// Pure: reconcile thread notes when a thread becomes the open/active thread. If a note exists
+// for `threadId`, returns the notes WITHOUT it and hadNote:true; otherwise returns the notes
+// unchanged and hadNote:false. A null/absent threadId (no active thread) removes nothing and
+// never touches unrelated notes. This is the exact behavior the ActiveThreadWatcher previously
+// performed via raw setThreadNotes + threadNotesRef + removeThreadNote — now testable in
+// isolation. `hadNote` lets the caller decide whether to markRead the thread on its own channel.
+function reconcileThreadNoteOnOpen(notes, threadId) {
+  const src = notes || {};
+  const hadNote = !!(threadId && src[threadId]);
+  if (!hadNote) return { notes: src, hadNote: false };
+  const next = { ...src };
+  delete next[threadId];
+  return { notes: next, hadNote: true };
+}
+
 function usePlatformRuntime(deps) {
   const {
     currentUser,                    // session-derived { id, name, instructor, ... } | null (App-owned)
@@ -42,8 +57,9 @@ function usePlatformRuntime(deps) {
     requestNotificationPermission,  // () => void
     upsertThreadNote,               // (setThreadNotes, note) => void
     featuredConfig,                 // ASSISTANT_CONFIG.featuredUpdates
-    closeMobileNav,                 // () => void  (view-owned drawer close; preserves behavior)
   } = deps;
+  // NOTE: mobile-drawer closing is NOT a runtime concern. selectChannel performs channel
+  // behavior only; the view wraps it to also close the App-owned mobile drawer.
 
   // --- persistent connected-runtime state (each has a current lifecycle reason) ---
   const [chatClient, setChatClient] = useState(null);
@@ -176,12 +192,11 @@ function usePlatformRuntime(deps) {
   }, [allChannels, channelMap, currentUser]);
 
   // Select a channel: clears its badges, watches it, and stops watching the previous one so
-  // only the active channel is watched (preserves unread/mention persistence elsewhere). The
-  // mobile drawer close is delegated to the view via closeMobileNav (view-owned state).
+  // only the active channel is watched (preserves unread/mention persistence elsewhere). This
+  // is channel behavior only — the view wraps it to also close the App-owned mobile drawer.
   const selectChannel = useCallback(async (id) => {
     const prevId = activeIdRef.current;
     setActiveId(id);
-    if (closeMobileNav) closeMobileNav();
     setUnreadCounts((prev) => ({ ...prev, [id]: 0 }));
     setMentionCounts((prev) => ({ ...prev, [id]: 0 }));
     if (STATIC_CHANNELS.includes(id)) return;
@@ -191,7 +206,7 @@ function usePlatformRuntime(deps) {
       const prevCh = channelMap[prevId];
       if (prevCh && prevCh.stopWatching) { try { await prevCh.stopWatching(); } catch (e) {} }
     }
-  }, [ensureChannel, channelMap, closeMobileNav]);
+  }, [ensureChannel, channelMap]);
 
   // Open a thread from a thread-note: select its channel (if needed) then queue the jump.
   const openThreadTarget = useCallback((note) => {
@@ -206,15 +221,25 @@ function usePlatformRuntime(deps) {
     setPendingFeatured({ channelId: item.channelId, messageId: item.messageId });
   }, [selectChannel]);
 
-  // Semantic wrappers for the thread/featured child handlers (no raw setters exposed).
-  const setOpenThread = useCallback((id) => setOpenThreadId(id), []);
-  const closeThread = useCallback(() => setOpenThreadId(null), []);
-  const clearPendingThread = useCallback(() => setPendingThread(null), []);
+  // Active-thread reconciliation. Replaces the ActiveThreadWatcher's raw access to
+  // setOpenThreadId + threadNotesRef + removeThreadNote with one semantic op: record the
+  // now-open thread identity (or null for no active thread), remove a matching thread note if
+  // one exists, and RETURN whether a note existed so the caller can markRead the thread on the
+  // Stream channel it owns. Unrelated notes are never touched.
+  const activeThreadChanged = useCallback((threadId) => {
+    setOpenThreadId(threadId);
+    const hadNote = !!(threadId && threadNotesRef.current[threadId]);
+    if (hadNote) setThreadNotes((prev) => reconcileThreadNoteOnOpen(prev, threadId).notes);
+    return hadNote;
+  }, []);
+  // Thread cross-channel navigation resolved (opened OR failed) — clears the pending target.
+  const resolveThreadJump = useCallback(() => setPendingThread(null), []);
+  // Featured navigation outcomes.
   const completeFeaturedJump = useCallback(() => setPendingFeatured(null), []);
   const markFeaturedUnavailable = useCallback(() => { setPendingFeatured(null); setFeaturedUnavailable(true); }, []);
-  // setThreadNotes is needed by the thread watcher/recovery paths; exposed as a semantic
-  // upsert bound to this runtime's store (never the raw setter).
-  const upsertThread = useCallback((note) => upsertThreadNote(setThreadNotes, note), [upsertThreadNote]);
+  // Featured acknowledgment — narrow semantic ops over the INTERNAL ack store (never exposed).
+  const isFeaturedAcknowledged = useCallback((featuredId) => getFeaturedAckStore().isAcknowledged(featuredId), [getFeaturedAckStore]);
+  const acknowledgeFeatured = useCallback((featuredIds) => getFeaturedAckStore().acknowledge(featuredIds), [getFeaturedAckStore]);
 
   // --- the controller-initiated, generation-aware channel setup seam (lifecycle) ---
   // The controller calls this with { client, userId, user, isCurrent }. We consult isCurrent()
@@ -404,13 +429,13 @@ function usePlatformRuntime(deps) {
     featuredItems, pendingFeatured, featuredUnavailable,
     channelUnreadReady, threadRecoveryReady, featuredUpdatesReady,
     // ---- semantic actions ----
-    selectChannel, ensureChannel,
-    openThreadTarget, setOpenThread, closeThread, clearPendingThread, upsertThread,
+    selectChannel,
+    openThreadTarget, activeThreadChanged, resolveThreadJump,
     openFeaturedTarget, completeFeaturedJump, markFeaturedUnavailable,
-    getFeaturedAckStore,
+    isFeaturedAcknowledged, acknowledgeFeatured,
     // ---- lifecycle (controller-initiated) ----
     setupChannels,
   };
 }
 
-module.exports = { usePlatformRuntime, CONNECTED_PHASES };
+module.exports = { usePlatformRuntime, CONNECTED_PHASES, reconcileThreadNoteOnOpen };
