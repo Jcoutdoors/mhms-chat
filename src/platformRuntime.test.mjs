@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { reconcileThreadNoteOnOpen } from './platformRuntime.js';
+import { reconcileThreadNoteOnOpen, emptyRuntimeState, disposeBagOwned } from './platformRuntime.js';
 
 const SRC = readFileSync(new URL('./platformRuntime.js', import.meta.url), 'utf8');
 // The hook's contract return is the LAST `return {` in the file (an earlier one belongs to the
@@ -40,6 +40,48 @@ test('no active thread (null) removes nothing and never touches unrelated notes'
 
 test('defensive: null notes input yields an empty, hadNote:false result', () => {
   assert.deepEqual(reconcileThreadNoteOnOpen(null, 't1'), { notes: {}, hadNote: false });
+});
+
+// ---- complete user-scoped teardown state (issue 1) ----
+test('emptyRuntimeState resets ALL user-scoped state; activeId -> configured initial channel', () => {
+  assert.deepEqual(emptyRuntimeState('cats-general'), {
+    chatClient: null, channelMap: {}, activeId: 'cats-general',
+    unreadCounts: {}, mentionCounts: {}, threadNotes: {},
+    pendingThread: null, openThreadId: null, pendingFeatured: null,
+    featuredUnavailable: false, featuredItems: [],
+    channelUnreadReady: false, threadRecoveryReady: false, featuredUpdatesReady: false,
+  });
+  // the configured initial channel is honored (not hardcoded)
+  assert.equal(emptyRuntimeState('cats-mod-3').activeId, 'cats-mod-3');
+});
+
+// ---- owned-bag disposal / stale-vs-newer ownership (issues 4) ----
+function fakeBag() { let n = 0; return { dispose() { n += 1; }, get disposeCount() { return n; } }; }
+
+test('disposeBagOwned disposes an OWNED bag and clears the owner ref', () => {
+  const bag = fakeBag();
+  const ownerRef = { current: bag };
+  const cleared = disposeBagOwned(bag, ownerRef);
+  assert.equal(bag.disposeCount, 1);
+  assert.equal(ownerRef.current, null, 'owner ref cleared');
+  assert.equal(cleared, true);
+});
+
+test('a stale/local bag is disposed but CANNOT clear a newer owner ref', () => {
+  const stale = fakeBag();
+  const newer = fakeBag();
+  const ownerRef = { current: newer };            // a newer setup already installed its bag
+  const cleared = disposeBagOwned(stale, ownerRef);
+  assert.equal(stale.disposeCount, 1, 'stale bag disposed (its own)');
+  assert.equal(newer.disposeCount, 0, 'newer bag NOT disposed');
+  assert.equal(ownerRef.current, newer, 'newer owner ref untouched');
+  assert.equal(cleared, false);
+});
+
+test('disposeBagOwned is a no-op for a null bag', () => {
+  const ownerRef = { current: 'x' };
+  assert.equal(disposeBagOwned(null, ownerRef), false);
+  assert.equal(ownerRef.current, 'x');
 });
 
 // ---- mobile presentation decoupling (contract revision #2) ----

@@ -46,6 +46,39 @@ function reconcileThreadNoteOnOpen(notes, threadId) {
   return { notes: next, hadNote: true };
 }
 
+// Pure: the empty, user-scoped runtime state. Used by teardown so no data or pending navigation
+// from one verified user can survive into another verified session. `activeId` resets to the
+// configured initial channel. Static config / injected deps are NOT part of this.
+function emptyRuntimeState(initialChannelId) {
+  return {
+    chatClient: null,
+    channelMap: {},
+    activeId: initialChannelId,
+    unreadCounts: {},
+    mentionCounts: {},
+    threadNotes: {},
+    pendingThread: null,
+    openThreadId: null,
+    pendingFeatured: null,
+    featuredUnavailable: false,
+    featuredItems: [],
+    channelUnreadReady: false,
+    threadRecoveryReady: false,
+    featuredUpdatesReady: false,
+  };
+}
+
+// Dispose `bag` (idempotent via listenerBag) and clear the owner ref ONLY if it still points at
+// `bag`. This is the ownership rule that lets a stale/older op dispose its OWN local bag while
+// never disposing or clearing a NEWER op's bag. Returns whether the owner ref was cleared.
+// `ownerRef` is a { current } ref object.
+function disposeBagOwned(bag, ownerRef) {
+  if (!bag) return false;
+  bag.dispose();
+  if (ownerRef.current === bag) { ownerRef.current = null; return true; }
+  return false;
+}
+
 function usePlatformRuntime(deps) {
   const {
     currentUser,                    // session-derived { id, name, instructor, ... } | null (App-owned)
@@ -85,27 +118,58 @@ function usePlatformRuntime(deps) {
   const threadNotesRef = useRef({});
   const featuredAckStoreRef = useRef(null);
 
+  // Tracks whether we have been in a connected phase, so the full user-scoped teardown runs
+  // exactly once on the connected -> disconnected transition (not throughout the pre-auth flow).
+  const wasConnectedRef = useRef(false);
+
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
   useEffect(() => { openThreadIdRef.current = openThreadId; }, [openThreadId]);
   useEffect(() => { threadNotesRef.current = threadNotes; }, [threadNotes]);
 
+  // Dispose a listener bag idempotently, clearing the shared reference ONLY if it still owns
+  // that reference (so a stale/older op can never dispose or clear a newer op's bag).
+  const disposeOwnedBag = useCallback((bag) => { disposeBagOwned(bag, authBagRef); }, []);
+
+  // Complete user-scoped teardown: dispose live listeners and reset ALL authenticated-user +
+  // connected-runtime state and internal user-scoped refs to their empty values. Static config
+  // and injected deps are untouched. Guarantees no data or pending navigation from one verified
+  // user survives into another verified session.
+  const teardownRuntime = useCallback(() => {
+    disposeOwnedBag(authBagRef.current);
+    const empty = emptyRuntimeState(getInitialChannelId());
+    setChatClient(empty.chatClient);
+    setChannelMap(empty.channelMap);
+    setActiveId(empty.activeId);
+    setUnreadCounts(empty.unreadCounts);
+    setMentionCounts(empty.mentionCounts);
+    setThreadNotes(empty.threadNotes);
+    setPendingThread(empty.pendingThread);
+    setOpenThreadId(empty.openThreadId);
+    setPendingFeatured(empty.pendingFeatured);
+    setFeaturedUnavailable(empty.featuredUnavailable);
+    setFeaturedItems(empty.featuredItems);
+    setChannelUnreadReady(empty.channelUnreadReady);
+    setThreadRecoveryReady(empty.threadRecoveryReady);
+    setFeaturedUpdatesReady(empty.featuredUpdatesReady);
+    clientRef.current = null;
+    activeIdRef.current = empty.activeId;
+    openThreadIdRef.current = null;
+    threadNotesRef.current = {};
+    featuredAckStoreRef.current = null;
+  }, [disposeOwnedBag, getInitialChannelId]);
+
   // On unmount, dispose whatever listeners are live.
-  useEffect(() => () => {
-    if (authBagRef.current) { authBagRef.current.dispose(); authBagRef.current = null; }
-  }, []);
+  useEffect(() => () => { disposeOwnedBag(authBagRef.current); }, [disposeOwnedBag]);
 
   // Teardown when we leave the connected phases (logout / sign-out error / service error /
-  // session end). The controller has already disconnected Stream; this disposes the JS
-  // listeners and clears the mirrored client + connected view state. setupChannels also
-  // disposes the prior bag on client replacement/retry — this is the logout/teardown counterpart.
+  // session end) — but only on the connected -> disconnected transition. The controller has
+  // already disconnected Stream; this disposes the JS listeners and resets all user-scoped
+  // runtime state/refs. setupChannels also disposes the prior bag on client replacement/retry —
+  // this is the logout/teardown counterpart. Runtime teardown NEVER disconnects Stream.
   useEffect(() => {
-    if (!CONNECTED_PHASES.includes(authPhase)) {
-      if (authBagRef.current) { authBagRef.current.dispose(); authBagRef.current = null; }
-      if (clientRef.current) clientRef.current = null;
-      setChatClient((c) => (c ? null : c));
-      setChannelMap((m) => (Object.keys(m).length ? {} : m));
-    }
-  }, [authPhase]);
+    if (CONNECTED_PHASES.includes(authPhase)) { wasConnectedRef.current = true; return; }
+    if (wasConnectedRef.current) { wasConnectedRef.current = false; teardownRuntime(); }
+  }, [authPhase, teardownRuntime]);
 
   // Auto-clear the transient "featured update no longer available" notice.
   useEffect(() => {
@@ -221,17 +285,32 @@ function usePlatformRuntime(deps) {
     setPendingFeatured({ channelId: item.channelId, messageId: item.messageId });
   }, [selectChannel]);
 
-  // Active-thread reconciliation. Replaces the ActiveThreadWatcher's raw access to
-  // setOpenThreadId + threadNotesRef + removeThreadNote with one semantic op: record the
-  // now-open thread identity (or null for no active thread), remove a matching thread note if
-  // one exists, and RETURN whether a note existed so the caller can markRead the thread on the
-  // Stream channel it owns. Unrelated notes are never touched.
+  // Record the active thread (or null for none) — void. Reconciliation (removing a matching
+  // unread note + marking that thread read) is owned by the runtime effect below, which reads
+  // CURRENT state rather than a passively-synchronized ref, so it can never act on stale data
+  // and never returns a stale synchronous decision.
   const activeThreadChanged = useCallback((threadId) => {
     setOpenThreadId(threadId);
-    const hadNote = !!(threadId && threadNotesRef.current[threadId]);
-    if (hadNote) setThreadNotes((prev) => reconcileThreadNoteOnOpen(prev, threadId).notes);
-    return hadNote;
   }, []);
+
+  // Runtime-owned active-thread reconciliation. When a thread is open AND a matching unread note
+  // exists in CURRENT state, remove that note and mark the thread read on its channel — read
+  // marking happens ONLY when a matching unread note existed. After removal the note is gone, so
+  // the effect settles (no loop). Closing (openThreadId null) removes nothing and never touches
+  // unrelated notes. The markRead side effect runs in the effect body, NEVER inside a state
+  // updater (React may invoke updaters more than once under StrictMode/concurrent rendering).
+  useEffect(() => {
+    if (!openThreadId) return;
+    const note = threadNotes[openThreadId];
+    if (!note) return;
+    setThreadNotes((prev) => reconcileThreadNoteOnOpen(prev, openThreadId).notes);
+    const ch = channelMap[note.channelId]
+      || (clientRef.current && clientRef.current.activeChannels && clientRef.current.activeChannels['messaging:' + note.channelId]);
+    if (ch && ch.markRead) {
+      ch.markRead({ thread_id: openThreadId }).catch((e) => console.warn('[CATS THREAD DIAG] markRead (open) failed', e && e.message));
+    }
+  }, [openThreadId, threadNotes, channelMap]);
+
   // Thread cross-channel navigation resolved (opened OR failed) — clears the pending target.
   const resolveThreadJump = useCallback(() => setPendingThread(null), []);
   // Featured navigation outcomes.
@@ -247,12 +326,15 @@ function usePlatformRuntime(deps) {
   // registration; a stale generation disposes exactly the listeners it registered and commits
   // nothing more. All Stream listeners register through `bag` for atomic disposal.
   const setupChannels = useCallback(async ({ client, userId, user, isCurrent }) => {
+    // Only a CURRENT invocation may replace the active listener bag. If already stale, return
+    // without touching ownership so a superseded setup can never dispose the newer owner's bag.
+    if (!isCurrent()) return;
     if (authBagRef.current) { authBagRef.current.dispose(); authBagRef.current = null; }
     const bag = createListenerBag();
     authBagRef.current = bag;
     const profile = (user && user.id) ? user : { id: userId };
     try {
-      if (!isCurrent()) { bag.dispose(); return; }
+      if (!isCurrent()) { disposeOwnedBag(bag); return; }
       clientRef.current = client;
 
       const initialId = getInitialChannelId();
@@ -268,7 +350,7 @@ function usePlatformRuntime(deps) {
         );
         retainConfiguredChannels(queried).forEach((ch) => { map[ch.id] = ch; });
       } catch (e) { /* fall through; set up the active channel below */ }
-      if (!isCurrent()) { bag.dispose(); return; }
+      if (!isCurrent()) { disposeOwnedBag(bag); return; }
 
       for (const chDef of allChannels) {
         let ch = map[chDef.id];
@@ -279,7 +361,7 @@ function usePlatformRuntime(deps) {
         const isMember = ch.state && ch.state.members && ch.state.members[profile.id];
         if (!isMember) {
           try { await ch.addMembers([profile.id]); } catch (e) {}
-          if (!isCurrent()) { bag.dispose(); return; }
+          if (!isCurrent()) { disposeOwnedBag(bag); return; }
         }
       }
 
@@ -288,7 +370,7 @@ function usePlatformRuntime(deps) {
         await activeCh.watch({ presence: true });
         map[initialChDef.id] = activeCh;
       } catch (e) {}
-      if (!isCurrent()) { bag.dispose(); return; }
+      if (!isCurrent()) { disposeOwnedBag(bag); return; }
 
       setChatClient(client);
       setChannelMap(map);
@@ -309,12 +391,12 @@ function usePlatformRuntime(deps) {
         console.log('[CATS DIAG seed] result -> unread:', JSON.stringify(seededUnread), '| mentions:', JSON.stringify(seededMentions));
         delete seededUnread[initialChDef.id];
         delete seededMentions[initialChDef.id];
-        if (!isCurrent()) { bag.dispose(); return; }
+        if (!isCurrent()) { disposeOwnedBag(bag); return; }
         setUnreadCounts(seededUnread);
         setMentionCounts(seededMentions);
         if (map[initialChDef.id]) { try { await map[initialChDef.id].markRead(); } catch (e) {} }
       } catch (e) { /* read state unavailable: fall back to live-only counting */ }
-      if (!isCurrent()) { bag.dispose(); return; }
+      if (!isCurrent()) { disposeOwnedBag(bag); return; }
       setChannelUnreadReady(true);
 
       const detectAndAlert = (event) => {
@@ -346,7 +428,7 @@ function usePlatformRuntime(deps) {
         }
       };
 
-      if (!isCurrent()) { bag.dispose(); return; }
+      if (!isCurrent()) { disposeOwnedBag(bag); return; }
       { const s = client.on('message.new', (event) => detectAndAlert(event)); bag.add(() => s.unsubscribe()); }
       { const s = client.on('notification.message_new', (event) => detectAndAlert(event)); bag.add(() => s.unsubscribe()); }
       requestNotificationPermission();
@@ -367,6 +449,7 @@ function usePlatformRuntime(deps) {
         try {
           const probe = clientRef.current.channel('messaging', channelId);
           const response = await probe.getMessagesById([parentId]);
+          if (!isCurrent()) return; // stale generation after the async parent lookup: no mutation/notification
           const parent = response && response.messages && response.messages[0];
           if (!parent) { console.warn('[CATS THREAD DIAG] parent lookup returned no message', parentId); return; }
           if (parent.user?.id !== profile.id) { console.log('[CATS THREAD DIAG] rejected: not my thread', { parentAuthor: parent.user?.id }); return; }
@@ -388,6 +471,7 @@ function usePlatformRuntime(deps) {
       const reconcileThreads = async (trigger) => {
         try {
           const result = await client.queryThreads({ watch: false, limit: 30, participant_limit: 10, reply_limit: 1 });
+          if (!isCurrent()) return; // stale generation after the async queryThreads: skip reconciliation
           const threads = result.threads || [];
           console.log('[CATS THREAD DIAG] queryThreads result', { trigger, count: threads.length });
           threads.forEach((thread) => {
@@ -417,10 +501,10 @@ function usePlatformRuntime(deps) {
 
       retrieveFeaturedUpdates(client, map, profile, isCurrent).finally(() => { if (isCurrent()) setFeaturedUpdatesReady(true); });
     } catch (e) {
-      if (authBagRef.current === bag) { bag.dispose(); authBagRef.current = null; }
+      disposeOwnedBag(bag);
       throw e;
     }
-  }, [allChannels, getInitialChannelId, canPostAnnouncements, fireMentionAlert, requestNotificationPermission, upsertThreadNote, retrieveFeaturedUpdates]);
+  }, [allChannels, getInitialChannelId, canPostAnnouncements, fireMentionAlert, requestNotificationPermission, upsertThreadNote, retrieveFeaturedUpdates, disposeOwnedBag]);
 
   return {
     // ---- read-only data ----
@@ -438,4 +522,4 @@ function usePlatformRuntime(deps) {
   };
 }
 
-module.exports = { usePlatformRuntime, CONNECTED_PHASES, reconcileThreadNoteOnOpen };
+module.exports = { usePlatformRuntime, CONNECTED_PHASES, reconcileThreadNoteOnOpen, emptyRuntimeState, disposeBagOwned };
