@@ -8,7 +8,7 @@
     "test:identity": "node --test src/identity.test.js src/identity.esm.test.mjs",
     "test:notifications": "node --test cloudflare-workers/notification-worker.test.mjs",
     "test:auth": "node --test src/authClient.test.mjs src/authState.test.mjs src/authErrors.test.mjs src/profileCompleteness.test.mjs src/orgConfig.test.mjs",
-    "test:phase4b": "node --test src/authIntegration.test.mjs src/streamConnect.test.mjs src/legacyStorage.test.mjs src/authCodeInput.test.mjs src/cooldown.test.mjs src/listenerBag.test.mjs src/profileForm.test.mjs src/authController.test.mjs",
+    "test:phase4b": "node --test src/authIntegration.test.mjs src/streamConnect.test.mjs src/legacyStorage.test.mjs src/authCodeInput.test.mjs src/cooldown.test.mjs src/listenerBag.test.mjs src/profileForm.test.mjs src/authController.test.mjs src/platformRuntime.test.mjs src/appWiring.test.mjs",
     "test:build": "node --test scripts/publishPlan.test.mjs scripts/publishCli.test.mjs",
     "build": "webpack",
     "publish:bundle": "node scripts/publish-bundle.js",

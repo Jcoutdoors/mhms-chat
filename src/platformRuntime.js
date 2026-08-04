@@ -34,9 +34,8 @@ const CONNECTED_PHASES = ['loadingProfile', 'profileSetup', 'savingProfile', 'co
 // Pure: reconcile thread notes when a thread becomes the open/active thread. If a note exists
 // for `threadId`, returns the notes WITHOUT it and hadNote:true; otherwise returns the notes
 // unchanged and hadNote:false. A null/absent threadId (no active thread) removes nothing and
-// never touches unrelated notes. This is the exact behavior the ActiveThreadWatcher previously
-// performed via raw setThreadNotes + threadNotesRef + removeThreadNote — now testable in
-// isolation. `hadNote` lets the caller decide whether to markRead the thread on its own channel.
+// never touches unrelated notes. Used by the runtime-owned reconciliation effect, which decides
+// when to call markRead; `hadNote` is retained for that effect and for isolated testing.
 function reconcileThreadNoteOnOpen(notes, threadId) {
   const src = notes || {};
   const hadNote = !!(threadId && src[threadId]);
@@ -123,7 +122,6 @@ function usePlatformRuntime(deps) {
   const clientRef = useRef(null);           // mirrors the controller's connected client for handlers
   const activeIdRef = useRef(activeId);
   const openThreadIdRef = useRef(null);
-  const threadNotesRef = useRef({});
   const featuredAckStoreRef = useRef(null);
 
   // Tracks whether we have been in a connected phase, so the full user-scoped teardown runs
@@ -132,7 +130,6 @@ function usePlatformRuntime(deps) {
 
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
   useEffect(() => { openThreadIdRef.current = openThreadId; }, [openThreadId]);
-  useEffect(() => { threadNotesRef.current = threadNotes; }, [threadNotes]);
 
   // Dispose a listener bag idempotently, clearing the shared reference ONLY if it still owns
   // that reference (so a stale/older op can never dispose or clear a newer op's bag).
@@ -162,7 +159,6 @@ function usePlatformRuntime(deps) {
     clientRef.current = null;
     activeIdRef.current = empty.activeId;
     openThreadIdRef.current = null;
-    threadNotesRef.current = {};
     featuredAckStoreRef.current = null;
   }, [disposeOwnedBag, getInitialChannelId]);
 
