@@ -138,3 +138,36 @@ Two related items remain **unchanged legacy debt** (not regressions, and not fix
 **Fix, when prioritized:** same as 4A2 — enforce privileged actions via Stream server-side roles /
 channel permissions, and stop trusting any client-writable `instructor` field (current user *or*
 peer). Tracked for the post-cutover hardening initiative, after Phase 4C.
+
+## VIF Phase 4C — production cutover open items (stabilization backlog)
+
+The verified-auth bundle was cut over to production on 2026-08-04 (merge
+`4fa562f2fec6718bbdadb93f948d2065104e34fb`, live bundle
+`9c7fbc64ccbc10c72396079ff7ccc9b103ee417d7402e7afaa20e6127d2b703b`, rollback bundle
+`09380247098d05875d891aeb25c64311f460192ae48d00234d6e056f3a039961`). Supervised live validation
+passed (verified-auth, real-Stream no-clobber, session restoration, routing, Stream-only Edit
+Profile, community/channels/history, instructor gating, truthful logout-failure + retry, listener
+no-duplication, desktop/mobile ATLAS, and the authenticated + logged-out Squarespace iframe). The
+following are **non-blocking** open items carried into the stabilization window.
+
+**Production Improvements (UX; no behavior change shipped):**
+- **Sign-out control discoverability.** Sign out is a small icon in the sidebar footer next to the
+  profile control; it is easy to miss. Consider a clearer label/menu affordance.
+- **Missing Edit-Profile cancel control.** `ProfileForm` (in the verified-auth flow) offers only
+  "Save Profile" — an editing user can exit only by saving, signing out, or refreshing. Add a Cancel
+  that returns to community without saving.
+
+**Deferred hardening:**
+- **Session-expiry runtime trigger.** The controller has a tested `sessionExpired()` capability and a
+  truthful `sessionExpired` screen, but no runtime trigger decides when to declare a live session
+  expired from Stream signals (a speculative trigger could false-positive-kick on a transient drop).
+  Wire a conservative trigger during post-cutover hardening.
+
+**Device matrix:**
+- **Safari.** Not validated during cutover (unavailable in the validation environment). Validate
+  Safari (desktop + iOS) during the stabilization window as a device-matrix item.
+
+**Stabilization constraints (in force 48–72 h from 2026-08-04):** the legacy Worker
+(`mhms-chat-token`) remains live, the rollback bundle remains recoverable, and rollback artifacts are
+retained. **Do not** retire the legacy Worker, remove the prior bundle, retire legacy identity code,
+or begin profile-photo development until stabilization completes and is separately reviewed.
