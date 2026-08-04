@@ -1294,24 +1294,11 @@ function ThreadJumpHandler({
 
         if (cancelled) return;
 
+        // Stage 1: PlatformRuntime is the sole owner of thread-note reconciliation and the
+        // thread-level markRead for a noted thread (ActiveThreadWatcher reports the opened
+        // thread -> runtime.activeThreadChanged -> the runtime removes the matching note and
+        // marks it read exactly once). This handler only resolves the pending jump.
         onOpened(pendingThread.threadId);
-
-        try {
-          await channel.markRead({
-            thread_id: pendingThread.threadId,
-          });
-
-          console.log(
-            '[CATS THREAD DIAG] thread marked read',
-            pendingThread.threadId
-          );
-        } catch (e) {
-          console.warn(
-            '[CATS THREAD DIAG] markRead failed',
-            pendingThread.threadId,
-            e.message
-          );
-        }
       } catch (e) {
         if (cancelled) return;
 

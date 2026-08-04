@@ -12,12 +12,17 @@ const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url),
 const ROOT_BUNDLE = new URL('../chat.bundle.js', import.meta.url);
 
 const LISTENERS = ['message.new', 'notification.message_new', 'notification.thread_message_new', 'connection.recovered'];
-// Slice the ActiveThreadWatcher component body for focused assertions.
-function activeThreadWatcherBody() {
-  const start = INDEX.indexOf('function ActiveThreadWatcher(');
-  assert.ok(start > 0, 'ActiveThreadWatcher present');
-  return INDEX.slice(start, INDEX.indexOf('\n}\n', start) + 3);
+// Robustly extract a top-level `function NAME(...) { ... }` body from source: from the
+// declaration to the first top-level closing brace line (`\n}\n`). Scoped to the named
+// component so it cannot match unrelated components or comments.
+function componentBody(src, name) {
+  const start = src.indexOf(`function ${name}(`);
+  assert.ok(start > 0, `${name} present`);
+  const end = src.indexOf('\n}\n', start);
+  assert.ok(end > start, `${name} body delimited`);
+  return src.slice(start, end + 3);
 }
+function activeThreadWatcherBody() { return componentBody(INDEX, 'ActiveThreadWatcher'); }
 
 test('1. index.jsx imports usePlatformRuntime', () => {
   assert.ok(/import\s*\{\s*usePlatformRuntime\s*\}\s*from\s*'\.\/platformRuntime'/.test(INDEX));
@@ -71,8 +76,19 @@ test('9. ActiveThreadWatcher no longer receives raw thread-note setters or refs'
   }
 });
 
-test('10. ActiveThreadWatcher performs no duplicate thread markRead', () => {
-  assert.equal(activeThreadWatcherBody().includes('markRead'), false, 'runtime owns thread markRead');
+test('10. PlatformRuntime is the SOLE owner of thread-level markRead for note reconciliation', () => {
+  // These check CALLS (`markRead(`), not the substring, so component comments mentioning
+  // "markRead" cannot satisfy or break the guard.
+  // (a) ActiveThreadWatcher (reporter only) issues no markRead call of any kind.
+  assert.equal(activeThreadWatcherBody().includes('markRead('), false, 'watcher makes no markRead call');
+  // (b) ThreadJumpHandler no longer issues a thread-level markRead after opening a thread.
+  const jump = componentBody(INDEX, 'ThreadJumpHandler');
+  assert.equal(/markRead\(\s*\{\s*[\s\S]*?thread_id/.test(jump), false, 'ThreadJumpHandler makes no thread markRead');
+  assert.equal(jump.includes('markRead('), false, 'ThreadJumpHandler makes no markRead call at all');
+  // (c) index.jsx contains no thread-level markRead call anywhere.
+  assert.equal(/markRead\(\s*\{\s*[\s\S]*?thread_id/.test(INDEX), false, 'no thread markRead anywhere in index.jsx');
+  // (d) the runtime owns exactly the thread-level markRead tied to note reconciliation.
+  assert.ok(/markRead\(\{\s*thread_id/.test(RUNTIME), 'runtime performs the thread-level markRead');
 });
 
 test('11. ThreadJumpHandler resolves both terminal outcomes via resolveThreadJump', () => {
