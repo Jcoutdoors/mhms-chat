@@ -144,7 +144,9 @@ peer). Tracked for the post-cutover hardening initiative, after Phase 4C.
 The verified-auth bundle was cut over to production on 2026-08-04 (merge
 `4fa562f2fec6718bbdadb93f948d2065104e34fb`, live bundle
 `9c7fbc64ccbc10c72396079ff7ccc9b103ee417d7402e7afaa20e6127d2b703b`, rollback bundle
-`09380247098d05875d891aeb25c64311f460192ae48d00234d6e056f3a039961`). Supervised live validation
+`09380247098d05875d891aeb25c64311f460192ae48d00234d6e056f3a039961`). *(The `9c7fbc64…` bundle was
+later superseded on 2026-08-05 by the Stage 1 bundle `f1b3ee48…`; see the Stage 1 section below.)*
+Supervised live validation
 passed (verified-auth, real-Stream no-clobber, session restoration, routing, Stream-only Edit
 Profile, community/channels/history, instructor gating, truthful logout-failure + retry, listener
 no-duplication, desktop/mobile ATLAS, and the authenticated + logged-out Squarespace iframe). The
@@ -171,3 +173,50 @@ following are **non-blocking** open items carried into the stabilization window.
 (`mhms-chat-token`) remains live, the rollback bundle remains recoverable, and rollback artifacts are
 retained. **Do not** retire the legacy Worker, remove the prior bundle, retire legacy identity code,
 or begin profile-photo development until stabilization completes and is separately reviewed.
+
+## Stage 1 (Platform Navigation & Home Foundation) — pre-existing items surfaced during closeout
+
+Stage 1 extracted the persistent connected runtime into `usePlatformRuntime` and is live
+(bundle `f1b3ee48…`; see `PROJECT_KNOWLEDGE.md` → "Stage 1"). It shipped **no behavior change**.
+The following are **not Stage 1 regressions**; they were observed or confirmed during Stage 1
+closeout and are carried forward.
+
+### Welcome Back can reappear mid-session on new thread activity (pre-existing)
+
+While connected, when new activity arrives in a thread the user participates in, the "Welcome
+Back" digest can re-appear during an active session (observed re-showing on each incoming
+thread reply, and re-showing immediately after dismissal while unacknowledged activity
+persisted).
+
+- **Pre-existing:** the Welcome Back eligibility logic predates Stage 1 (v63 Welcome Back /
+  phase4b2 era). Stage 1 only relocated a `useState`/debug line with logic unchanged. **Not a
+  Stage 1 regression.**
+- **Impact:** non-blocking; a returning-visit digest can resurface mid-session and require an
+  extra dismissal. No data effect.
+- **Likely cause:** the eligibility effect in `src/index.jsx` re-qualifies because its
+  dependencies include the live `threadNotes`/`featuredItems`, so `recapHasNewActivity`
+  recomputes true on new activity.
+- **Fix, when prioritized (isolated to Welcome Back eligibility):** gate the digest to
+  once-per-session, or acknowledge thread activity on show. Out of scope for Stage 1.
+
+### `window.__catsWBTrace` debug global ships in the production bundle (pre-existing)
+
+The bundle includes `window.__catsWBTrace`, a `showWelcomeBack`-transition trace (booleans +
+timestamps only).
+
+- **Pre-existing**, non-sensitive (no PII), and **not part of Stage 1**.
+- **Fix, when convenient:** remove the debug global in a narrow cleanup. (Deliberately NOT
+  removed during Stage 1 closeout.)
+
+### No safe connected fault-injection / trusted preview environment
+
+There is no trusted preview or safe fault-injection environment to exercise, without risk to
+production sessions/data:
+- the live `connection.recovered` event (connection-recovery path),
+- the forced thread-jump failure path,
+- automated cross-origin iframe (Squarespace embed) validation.
+
+These remained **unperformed** during Stage 1 connected validation and are **not** represented
+as passed. **This is a validation-capability gap, not a current release blocker.** A dedicated
+safe fault-injection / preview capability would close it; related to the absence of a
+dev/sandbox Stream app noted above.
