@@ -122,8 +122,12 @@ test('15. runtime tests are included in the normal test gate', () => {
   assert.ok(PKG.scripts['test:phase4b'].includes('src/appWiring.test.mjs'), 'wiring tests gated');
 });
 
-test('16. the committed root chat.bundle.js is unchanged (production bundle not modified)', () => {
+// Release-artifact pin. The former pre-cutover hash (9c7fbc64…) was intentionally
+// superseded when the reviewed Stage 1 bundle was published to the approved origin. This
+// guard now pins the approved Stage 1 production artifact. Future intentional bundle
+// releases MUST update this release pin as part of release closeout.
+test('16. the committed root chat.bundle.js matches the approved Stage 1 production artifact', () => {
   const hash = createHash('sha256').update(readFileSync(ROOT_BUNDLE)).digest('hex');
-  assert.equal(hash, '9c7fbc64ccbc10c72396079ff7ccc9b103ee417d7402e7afaa20e6127d2b703b',
-    'committed root chat.bundle.js must remain the reviewed production bundle');
+  assert.equal(hash, 'f1b3ee488cea66c82bab0b512226adff1553bc199c26a3a6c60d2091cf5d57bf',
+    'committed root chat.bundle.js must equal the approved Stage 1 production bundle');
 });
