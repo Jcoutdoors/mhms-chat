@@ -41,6 +41,14 @@ You need Node.js. From a working directory:
 6. In the GitHub repo `mhms-chat` (account `jcoutdoors`): delete the old 5 files, then upload the new 5 together.
 7. Wait ~2 minutes for GitHub Pages, then hard refresh the Squarespace page.
 
+**Release-artifact pin (required on every intentional bundle release).** `src/appWiring.test.mjs`
+test #16 pins the committed root `chat.bundle.js` SHA-256 to the approved production artifact, so
+the gate fails if the served bundle drifts from the reviewed one. When you intentionally publish a
+new bundle, update that pin to the new approved hash as part of release closeout, or the gate will
+(correctly) fail. Current approved production hash:
+`f1b3ee488cea66c82bab0b512226adff1553bc199c26a3a6c60d2091cf5d57bf` (Stage 1; supersedes the former
+`9c7fbc64…`).
+
 The live app is embedded at `https://www.mentalhealthmadesimple.life/catscourse#community`
 and served from `https://jcoutdoors.github.io/mhms-chat/`.
 

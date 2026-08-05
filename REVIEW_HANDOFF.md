@@ -1,3 +1,48 @@
+# Stage 1 Review Handoff — Platform Navigation & Home Foundation: persistent connected runtime (2026-08-05)
+
+Stage 1 extracts the persistent connected Community runtime into `usePlatformRuntime`
+(`src/platformRuntime.js`) so a future Platform Shell/Home can keep it mounted while the visible
+capability view changes. **Behavior-preserving** ownership migration — no product/UX change
+shipped. Renders only Community. **Stage 2 not started.** Full architecture + ownership boundary:
+`PROJECT_KNOWLEDGE.md` → "Stage 1" and `ARCHITECTURE_DECISIONS.md` → ADR-0001.
+
+**Release (source and bundle kept separate):**
+- **Source PR #25** → merge `8ad7490` (source/tests only; no bundle/chunk). Stage 1 corrective
+  thread-read commit `5a688d09925336d945f229ce38ae07ec3b2a3ca3` (centralized thread-read
+  reconciliation; removed the duplicate `ThreadJumpHandler` `markRead`).
+- **Bundle PR #26** → merge `a6af17ef` (one file: `chat.bundle.js`).
+- **Test-pin PR #27** → merge `2bc3eca755e44c13de029b3b530c9ca0864e1da1` (one file:
+  `src/appWiring.test.mjs`; re-pins the release-artifact guard to the approved Stage 1 bundle).
+
+**Hashes:** approved production bundle
+`f1b3ee488cea66c82bab0b512226adff1553bc199c26a3a6c60d2091cf5d57bf` (root == dist == live),
+**superseding** `9c7fbc64ccbc10c72396079ff7ccc9b103ee417d7402e7afaa20e6127d2b703b` (historical).
+Post-cutover gate: appWiring 16/16, platformRuntime 14/14, phase4b 125/125, auth 69, build 40,
+identity 9, notifications 12, featured 41/41, auth/pages 72, verification-do 37; build
+deterministic.
+
+**Connected validation — approved origin `https://chat.mentalhealthmadesimple.life`:** verified
+returning-user auth, Community render, channel navigation, Getting Started, unread/thread-note
+behavior, notification-driven cross-channel thread open with **exactly one** thread-level
+`markRead` (no duplicate), native thread open, logout, relogin, clean runtime state after
+relogin (no duplicate unread/mention/thread events).
+
+**Squarespace validation — `https://www.mentalhealthmadesimple.life/catscourse#community`:**
+iframe loaded and served the Stage 1 bundle; returning session restored to Community in the
+embed; channel navigation, Getting Started, thread open/close, mobile drawer and
+close-on-select all worked; no console, CORS, cookie, storage, focus, sizing, or origin blocker.
+
+**Not safely exercised (NOT claimed as passed):** live `connection.recovered` event; forced
+thread-jump failure path. See `TECHNICAL_DEBT.md`.
+
+**Known, pre-existing (not Stage 1 regressions):** Welcome Back mid-session re-fire; the
+`window.__catsWBTrace` debug global. Both tracked in `TECHNICAL_DEBT.md`.
+
+**Recommendation:** Stage 1 approved and live. Stage 2 remains on hold pending documentation
+closeout review.
+
+---
+
 # VIF Phase 3 Review Handoff — independent auth deployment + browser matrix (2026-07-30)
 
 Independent production deployment of the Verified Identity auth service, validated end-to-end.

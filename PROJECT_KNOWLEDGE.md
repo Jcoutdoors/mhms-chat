@@ -1345,7 +1345,7 @@ verified email session (`/token`), and Stream connects with `{ id }` only (no pr
 
 **Release facts**
 - Cutover merge commit (PR #23 → `main`): `4fa562f2fec6718bbdadb93f948d2065104e34fb`
-- Live production `chat.bundle.js` SHA-256: `9c7fbc64ccbc10c72396079ff7ccc9b103ee417d7402e7afaa20e6127d2b703b`
+- Live production `chat.bundle.js` SHA-256 **at Phase 4C cutover**: `9c7fbc64ccbc10c72396079ff7ccc9b103ee417d7402e7afaa20e6127d2b703b` — **superseded 2026-08-05 by the Stage 1 bundle `f1b3ee48…`** (see "Stage 1"); no longer the live artifact.
 - Rollback bundle SHA-256 (prior production, recoverable from git): `09380247098d05875d891aeb25c64311f460192ae48d00234d6e056f3a039961`
 - Rollback target: `git revert 4fa562f2…` restores the prior root bundle; the app also still runs on the legacy Worker.
 
@@ -1380,6 +1380,69 @@ stabilization + separate review + a documentation update.
 stabilization); Sign-out control discoverability; missing Edit-Profile cancel control; session-expiry
 runtime trigger (deferred hardening). Peer-message `instructor` remains **legacy/client-writable debt** and
 Stream role/channel permissions are **not server-enforced**.
+
+## Stage 1 — Platform Navigation & Home Foundation: Persistent Connected Runtime (LIVE in production)
+
+**What it is.** The first stage of the Platform Navigation & Home Foundation. It extracts the
+persistent connected Community runtime out of `App()` in `src/index.jsx` into a reusable hook,
+`usePlatformRuntime` (`src/platformRuntime.js`), so a future Platform Shell/Home can keep the
+runtime mounted while the visible capability view changes. **Stage 1 is intentionally
+behavior-preserving** — an ownership migration, not a UI/UX change. Stage 1 renders only
+Community. **Stage 2 (Platform Shell/Home) has not started.**
+
+**Ownership boundary** (see `ARCHITECTURE_DECISIONS.md` → ADR-0001 for the decision + rationale):
+- **PlatformRuntime owns:** connected channel setup and teardown; the channel map and
+  active-channel behavior; unread and mention state; thread-note state and reconciliation;
+  Featured Updates state and acknowledgment behavior; connected-runtime readiness flags; the
+  four migrated Stream event categories (`message.new`, `notification.message_new`,
+  `notification.thread_message_new`, `connection.recovered`); and complete user-scoped runtime
+  reset on disconnect.
+- **The auth controller still owns:** verified authentication; Stream connection/disconnection
+  authority; the auth generation; logout; and initiation of runtime setup.
+- **`App` still owns:** presentation composition; mobile drawer behavior; and the
+  rendering/navigation surfaces.
+
+The hook imports only leaf modules (`featuredUpdates`, `channelConfig`, `listenerBag`) and
+receives everything else by injected dependency (no import back from `index.jsx`). Generation
+guards (`ownsSetup`/`setupStillOwns`) and atomic listener disposal
+(`listenerBag`/`disposeBagOwned`) prevent stale/superseded setups from acting. The runtime is
+the **sole** owner of the single thread-level `markRead` per opened note; the previously
+duplicated `ThreadJumpHandler` `markRead` was removed (commit `5a688d0`).
+
+**Release record.**
+- Source PR #25 → merge `8ad7490`; Stage 1 corrective thread-read commit
+  `5a688d09925336d945f229ce38ae07ec3b2a3ca3`.
+- Bundle PR #26 → merge `a6af17ef`.
+- Test-pin PR #27 → merge `2bc3eca755e44c13de029b3b530c9ca0864e1da1` (updates the
+  `appWiring.test.mjs` release-artifact pin to the approved Stage 1 bundle).
+- **Approved production bundle:** `f1b3ee488cea66c82bab0b512226adff1553bc199c26a3a6c60d2091cf5d57bf`
+  (root == dist == live). **Supersedes** the former production bundle
+  `9c7fbc64ccbc10c72396079ff7ccc9b103ee417d7402e7afaa20e6127d2b703b` (that hash is historical,
+  not current).
+
+**Connected validation (approved origin `https://chat.mentalhealthmadesimple.life` and the
+Squarespace delivery surface `https://www.mentalhealthmadesimple.life/catscourse#community`).**
+Validated: verified returning-user authentication; Community rendering; channel navigation;
+Getting Started; unread and thread-note behavior; notification-driven cross-channel thread
+opening with **exactly one** thread-level `markRead`; native thread opening; logout; relogin;
+clean runtime state after relogin (no duplicate unread/mention/thread events); mobile drawer
+behavior; thread open and close in the mobile iframe; and Squarespace iframe auth + Community
+behavior. No console, CORS, cookie, storage, focus, sizing, or origin blocker appeared.
+
+**Not safely exercised (documented, NOT claimed as passed):** the live `connection.recovered`
+event and the forced thread-jump failure path — neither could be safely reproduced without a
+trusted fault-injection/preview environment (see `TECHNICAL_DEBT.md`).
+
+**Known production improvement (pre-existing, non-blocking):** the Welcome Back digest can
+reappear mid-session when new thread activity arrives. This behavior **predates Stage 1** (Welcome
+Back eligibility, v63/phase4b2 era) and is **not a Stage 1 regression**; recommended future
+correction is focused eligibility / once-per-session behavior. **Known cleanup:**
+`window.__catsWBTrace` remains in the production bundle — pre-existing, non-sensitive, a future
+narrow cleanup, not part of Stage 1. Both are tracked in `TECHNICAL_DEBT.md`.
+
+**Release-artifact pin.** `src/appWiring.test.mjs` test #16 now pins the committed root
+`chat.bundle.js` to the approved Stage 1 artifact `f1b3ee48…`. Future intentional bundle
+releases must update this pin as part of release closeout (see `SETUP.md`).
 
 ## QA SAFETY GUARDRAILS (required for all QA work)
 
