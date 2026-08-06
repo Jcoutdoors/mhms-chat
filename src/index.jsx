@@ -1817,6 +1817,290 @@ function WelcomeBackSummary({ recap, firstName, onSelectChannel, onSelectThread,
   );
 }
 
+// Stage 2 Slice 1: the connected Community experience, extracted verbatim from App().
+// Behavior-preserving — App still owns auth, the controller, currentUser, runtime
+// instantiation, and Welcome Back computation, and passes them in. Aliases below reproduce
+// the exact local names the moved JSX used so the presentation body is unchanged.
+function CommunityDestination({ runtime, currentUser, isMobile, mobileNavOpen, setMobileNavOpen, rosterMembers, onEditProfile, onLogout, onSelectChannel, onThreadNoteClick, welcome, welcomeBack }) {
+  const {
+    chatClient, channelMap, activeId, unreadCounts, mentionCounts,
+    threadNotes, pendingThread, pendingFeatured, featuredUnavailable,
+  } = runtime;
+  const handleChannelSelect = onSelectChannel;
+  const handleThreadNoteClick = onThreadNoteClick;
+  const showWelcome = welcome.show;
+  const dismissWelcome = (openGuide) => (openGuide ? welcome.onOpenGuide() : welcome.onDismiss());
+  const showWelcomeBack = welcomeBack.show;
+  const welcomeBackRecap = welcomeBack.recap;
+  const handleWelcomeBackChannelClick = welcomeBack.onSelectChannel;
+  const handleWelcomeBackThreadClick = welcomeBack.onSelectThread;
+  const handleWelcomeBackFeaturedClick = welcomeBack.onSelectFeatured;
+  const dismissWelcomeBack = welcomeBack.onDismiss;
+  if (!chatClient || Object.keys(channelMap).length === 0) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#fff' }}>
+        <style>{`@keyframes mhms-pulse{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}`}</style>
+        <div>{[0,1,2].map(i => <span key={i} style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#3a55d9', margin: '0 3px', animation: 'mhms-pulse 1.2s infinite', animationDelay: `${i*0.2}s` }} />)}</div>
+      </div>
+    );
+  }
+
+  const activeChannel = channelMap[activeId];
+
+  // Attach real Stream mentions (mentioned_users) when sending, so @name and @everyone
+  // register as genuine mentions. This is what makes the orange @ badge fire live AND
+  // persist across sessions (Stream's countUnreadMentions only counts real mentions).
+  // Our custom autocomplete inserts plain text, so Stream never recorded mentions before.
+  const submitWithMentions = async (messageOrText, channelCid, customMessageData, sendOptions) => {
+    // Stream's submit passes a message object {text, attachments, mentioned_users, parent, ...}
+    const msg = (typeof messageOrText === 'string') ? { text: messageOrText } : (messageOrText || {});
+    const text = msg.text || '';
+    const lower = text.toLowerCase();
+    const ch = activeChannel;
+    if (!ch) return;
+
+    const mentionedIds = new Set();
+
+    // Match @name against the roster (longest names first so full names win).
+    const roster = (rosterMembers || []).slice().sort((a, b) => (b.name || '').length - (a.name || '').length);
+    roster.forEach(u => {
+      if (!u || !u.name) return;
+      if (lower.includes('@' + u.name.toLowerCase())) mentionedIds.add(u.id);
+    });
+
+    // @everyone (instructor only): mention all channel members.
+    if (lower.includes('@everyone') && canPostAnnouncements(currentUser)) {
+      const members = ch.state && ch.state.members ? Object.keys(ch.state.members) : [];
+      members.forEach(id => { if (id !== currentUser?.id) mentionedIds.add(id); });
+    }
+
+    const payload = {
+      ...msg,
+      mentioned_users: Array.from(mentionedIds),
+    };
+    delete payload.parent; // parent is passed separately below for threads
+    try {
+      await ch.sendMessage({ ...payload, parent_id: msg.parent?.id }, sendOptions);
+    } catch (e) {
+      // fall back to a plain send if anything about the mention payload is rejected
+      try { await ch.sendMessage({ text }, sendOptions); } catch (e2) {}
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', height: isMobile ? '100dvh' : '100vh', minHeight: isMobile ? '100dvh' : undefined, fontFamily: "'DM Sans', sans-serif", background: 'radial-gradient(1200px 600px at 80% -10%, #eef1f8 0%, rgba(238,241,248,0) 60%), #e7e9f1', padding: isMobile ? 0 : 14, overflow: 'hidden' }}>
+      {showWelcome && <WelcomeCard name={currentUser?.name} onOpenGuide={() => dismissWelcome(true)} onDismiss={() => dismissWelcome(false)} />}
+      {showWelcomeBack && welcomeBackRecap && (
+        <WelcomeBackSummary
+          recap={welcomeBackRecap}
+          firstName={(currentUser?.name || '').split(' ')[0]}
+          onSelectChannel={handleWelcomeBackChannelClick}
+          onSelectThread={handleWelcomeBackThreadClick}
+          onSelectFeatured={handleWelcomeBackFeaturedClick}
+          onDismiss={dismissWelcomeBack}
+          isMobile={isMobile}
+        />
+      )}
+      {/* v63.1: accessible transient notice when a Featured Update target has vanished. */}
+      {featuredUnavailable && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{ position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 1200, background: '#181b26', color: '#fff', fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 500, padding: '10px 18px', borderRadius: 10, boxShadow: '0 8px 24px rgba(24,27,38,0.28)' }}
+        >
+          This update is no longer available.
+        </div>
+      )}
+      <div style={{ display: 'flex', flex: 1, background: '#fff', borderRadius: isMobile ? 0 : 18, boxShadow: isMobile ? 'none' : '0 24px 60px rgba(24,27,38,0.14)', overflow: 'hidden', border: isMobile ? 'none' : '1px solid rgba(255,255,255,0.6)', minHeight: 0 }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap');
+        :root{
+          --primary-900:#1d2a63;--primary-700:#2f44b8;--primary-600:#3a55d9;--primary-500:#5872ea;--primary-100:#e6ebfb;--primary-50:#f1f4fe;
+          --ink-900:#181b26;--ink-700:#383d4b;--ink-500:#686e7e;--ink-400:#969cac;--ink-300:#c4c9d4;
+          --line:#e7e9f0;--line-soft:#eef0f5;
+          --canvas:#e7e9f1;--sidebar:#f7f8fb;--surface:#ffffff;--raise:#fbfcfe;
+          --warm:#e07a5f;--gold:#c98a2b;--gold-100:#f8eed6;--green:#2faa6a;
+          --shadow-sm:0 1px 2px rgba(24,27,38,0.05),0 1px 3px rgba(24,27,38,0.04);
+          --shadow-md:0 4px 16px rgba(24,27,38,0.07),0 1px 4px rgba(24,27,38,0.05);
+          --shadow-lg:0 24px 60px rgba(24,27,38,0.14);
+        }
+        @keyframes mhms-pulse{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}
+        .str-chat{height:100%!important;font-family:'DM Sans',sans-serif!important}
+        .str-chat__container{height:100%!important}
+        .str-chat__main-panel{height:100%!important}
+        .str-chat-channel{height:100%!important}
+        .str-chat__channel-header{border-bottom:1px solid var(--line-soft)!important;background:rgba(255,255,255,0.85)!important;backdrop-filter:blur(8px)!important;padding:16px 24px!important;box-shadow:none!important}
+        .str-chat__channel-header-title{font-family:'DM Sans',sans-serif!important;font-weight:700!important;font-size:16px!important;color:var(--ink-900)!important;letter-spacing:0.005em!important}
+        .str-chat__channel-header-info{font-family:'DM Sans',sans-serif!important;font-size:12px!important;color:var(--ink-400)!important}
+        .str-chat__channel-header-menu-button{display:none!important}
+        .str-chat__header-hamburger{display:none!important}
+        .str-chat__message-input{border-top:none!important;background:transparent!important;padding:0!important;box-shadow:none!important}
+        .str-chat__message-textarea-react-host textarea,.str-chat__message-textarea{font-family:'DM Sans',sans-serif!important;font-size:14px!important;border-radius:14px!important;border:1px solid var(--line)!important;background:var(--raise)!important;padding:12px 14px!important;line-height:1.6!important;color:var(--ink-700)!important}
+        .str-chat__message-textarea-react-host textarea:focus,.str-chat__message-textarea:focus{border-color:var(--primary-500)!important;background:var(--surface)!important;outline:none!important;box-shadow:0 0 0 4px rgba(58,85,217,0.08)!important}
+        .str-chat__list{background:var(--surface)!important;padding:8px 0!important}
+        .str-chat__send-button{display:none!important}
+        .str-chat__avatar{display:none!important}
+        .str-chat__message-sender-name{display:none!important}
+        .str-chat__date-separator{display:flex!important;align-items:center!important;padding:16px 18px 12px!important;gap:14px!important}
+        .str-chat__date-separator-line{flex:1!important;height:1px!important;background:var(--line-soft)!important;border:none!important}
+        .str-chat__date-separator-date{font-family:'DM Sans',sans-serif!important;font-size:11px!important;font-weight:600!important;color:var(--ink-400)!important;letter-spacing:0.04em!important;text-transform:uppercase!important;background:transparent!important;padding:0!important}
+        .str-chat__jump-to-latest-message,.str-chat__scroll-to-bottom-button{position:absolute!important;bottom:16px!important;right:20px!important;z-index:50!important}
+        .str-chat__scroll-to-bottom-button button,.str-chat__jump-to-latest-message button{background:linear-gradient(135deg,var(--primary-600),var(--primary-700))!important;color:#fff!important;border-radius:20px!important;box-shadow:0 6px 18px rgba(58,85,217,0.32)!important;font-family:'DM Sans',sans-serif!important;border:none!important}
+        @media (max-width: 768px){
+          .str-chat__channel-header{padding-left:62px!important}
+          .cats-wiki{padding-top:64px!important}
+          /* On mobile, a thread takes over the full screen instead of splitting it */
+          .str-chat__thread{position:fixed!important;inset:0!important;width:100vw!important;max-width:100vw!important;height:100%!important;z-index:1200!important;background:#fff!important;margin:0!important;border-radius:0!important;box-shadow:none!important}
+          .str-chat__thread .str-chat__thread-header{padding:16px!important;border-bottom:1px solid #eef0f5!important}
+          /* Make sure the main message list isn't hidden behind anything when no thread is open */
+          .str-chat__main-panel{width:100%!important}
+        }
+      `}</style>
+      <Sidebar groups={APP_CONFIG.channelGroups} activeId={activeId} onSelect={handleChannelSelect} currentUser={currentUser} chatClient={chatClient} activeChannel={activeChannel} onEditProfile={onEditProfile} onLogout={onLogout} unreadCounts={unreadCounts} mentionCounts={mentionCounts} isMobile={isMobile} mobileNavOpen={mobileNavOpen} onCloseMobileNav={() => setMobileNavOpen(false)} />
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', minHeight: 0, minWidth: 0 }}>
+        {/* Persistent live-consult bar, visible across all channels */}
+        <a href={APP_CONFIG.consult.link} target="_blank" rel="noopener noreferrer"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, flexShrink: 0, background: 'linear-gradient(135deg, #3a55d9 0%, #2f44b8 100%)', color: '#fff', textDecoration: 'none', fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600, padding: '9px 16px', letterSpacing: '0.01em' }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{isMobile ? 'Live consults · every other week · 6pm MST' : 'Live consultations with Dr. Mayfield, every other week at 6pm MST (7pm CST / 8pm EST / 5pm PST). Full schedule in Getting Started.'}</span>
+          <span style={{ background: 'rgba(255,255,255,0.2)', borderRadius: 6, padding: '2px 9px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 }}>Join link</span>
+        </a>
+        {isMobile && !mobileNavOpen && (
+          <button onClick={() => setMobileNavOpen(true)} title="Open menu"
+            style={{ position: 'absolute', top: 50, left: 12, zIndex: 70, background: '#fff', border: '1px solid #e8e8e8', borderRadius: 8, width: 38, height: 38, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, cursor: 'pointer', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+            <span style={{ width: 16, height: 2, background: '#444', borderRadius: 2 }} />
+            <span style={{ width: 16, height: 2, background: '#444', borderRadius: 2 }} />
+            <span style={{ width: 16, height: 2, background: '#444', borderRadius: 2 }} />
+          </button>
+        )}
+        {STATIC_CHANNELS.includes(activeId) ? (
+          <GettingStartedWiki />
+        ) : activeChannel && (
+          <Chat client={chatClient} theme="str-chat__theme-light">
+            <Channel
+              channel={activeChannel}
+              EmptyStateIndicator={() => <ChannelEmptyState channelId={activeId} onJump={handleChannelSelect} />}
+              ThreadHeader={threadHeaderProps => (
+                <CatsThreadHeader
+                  {...threadHeaderProps}
+                  onClose={() => runtime.activeThreadChanged(null)}
+                />
+              )}
+            >
+              <Window>
+                <div style={{ position: 'relative' }}>
+                  <ChannelHeader />
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 13,
+                      right: 24,
+                      zIndex: 60,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <ThreadNoteBell
+                      notes={threadNotes}
+                      onSelect={handleThreadNoteClick}
+                    />
+                    <ChannelSearchPanel channel={activeChannel} />
+                  </div>
+                </div>
+                <MessageList Message={CustomMessage} disableDateSeparator={false} returnAllReadData={false} />
+                <div style={{ position: 'relative' }}>
+                  <TypingIndicator />
+                  {(activeId !== ANNOUNCEMENTS_ID || canPostAnnouncements(currentUser)) ? (
+                  <div style={{ display: 'flex', alignItems: 'flex-end', borderTop: '1px solid #eef0f5', background: '#fff', padding: '10px 16px', gap: 8, position: 'relative' }}>
+                    <MentionAutocomplete members={rosterMembers} canMentionEveryone={canPostAnnouncements(currentUser)} />
+                    <EmojiButton onEmojiSelect={(emoji) => {
+                      const textarea = document.querySelector('.str-chat__message-textarea-react-host textarea, .str-chat__message-textarea');
+                      if (textarea) {
+                        const start = textarea.selectionStart;
+                        const end = textarea.selectionEnd;
+                        const before = textarea.value.slice(0, start);
+                        const after = textarea.value.slice(end);
+                        const newVal = before + emoji + after;
+                        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+                        setter.call(textarea, newVal);
+                        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                        setTimeout(() => { textarea.focus(); textarea.setSelectionRange(start + emoji.length, start + emoji.length); }, 0);
+                      }
+                    }} />
+                    <div style={{ flex: 1 }}>
+                      <MessageInput grow={true} minRows={isMobile ? 1 : 5} maxRows={isMobile ? 6 : 12} overrideSubmitHandler={submitWithMentions} />
+                    </div>
+                    <button title="Send" onClick={() => {
+                      const ta = document.querySelector('.str-chat__message-textarea-react-host textarea, .str-chat__message-textarea');
+                      if (ta && ta.value.trim()) {
+                        ta.focus();
+                        ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                      }
+                    }}
+                      style={{ width: 40, height: 40, flexShrink: 0, borderRadius: 11, border: 'none', cursor: 'pointer', background: 'linear-gradient(135deg,#3a55d9,#2f44b8)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(58,85,217,0.32)', alignSelf: 'flex-end', marginBottom: 1, transition: 'transform 0.12s ease' }}
+                      onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-1px)'}
+                      onMouseLeave={e => e.currentTarget.style.transform = 'none'}>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13"></path><path d="M22 2 15 22l-4-9-9-4 20-7z"></path></svg>
+                    </button>
+                  </div>
+                  ) : (
+                    <div style={{ borderTop: '1px solid #ebebeb', background: '#fafafa', padding: '14px 16px', textAlign: 'center', fontSize: 12.5, color: '#999', fontFamily: "'DM Sans', sans-serif" }}>
+                      📣 Only the instructor can post in Announcements. Head to General to join the conversation.
+                    </div>
+                  )}
+                  {(activeId !== ANNOUNCEMENTS_ID || canPostAnnouncements(currentUser)) && (
+                    <div style={{ textAlign: 'center', fontSize: 11.5, fontWeight: 600, color: '#969cac', fontFamily: "'DM Sans', sans-serif", padding: '9px 16px 4px', letterSpacing: '0.005em' }}>
+                      Type @ to mention someone in the group · @mark or @dr. mark mayfield reaches Dr. Mayfield · @support reaches tech support
+                    </div>
+                  )}
+                </div>
+              </Window>
+              <Thread
+                additionalMessageInputProps={{
+                  grow: true,
+                  minRows: isMobile ? 1 : 5,
+                  maxRows: isMobile ? 6 : 12,
+                }}
+              />
+
+              <ThreadJumpHandler
+                pendingThread={pendingThread}
+                activeId={activeId}
+                channel={activeChannel}
+                onOpened={() => {
+                  // The runtime owns openThreadId + note reconciliation via activeThreadChanged;
+                  // both terminal outcomes only resolve the pending cross-channel jump.
+                  runtime.resolveThreadJump();
+                }}
+                onFailed={() => {
+                  // Leave the bell notification intact so the user can retry; clear only the
+                  // pending automatic jump to prevent a retry loop.
+                  runtime.resolveThreadJump();
+                }}
+              />
+
+              <ActiveThreadWatcher
+                onActiveThreadChanged={runtime.activeThreadChanged}
+                channel={activeChannel}
+              />
+
+              <FeaturedUpdateJumpHandler
+                pendingFeatured={pendingFeatured}
+                activeId={activeId}
+                channel={activeChannel}
+                onDone={runtime.completeFeaturedJump}
+                onUnavailable={runtime.markFeaturedUnavailable}
+              />
+            </Channel>
+          </Chat>
+        )}
+      </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [error, setError] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
@@ -2219,268 +2503,29 @@ function App() {
   }
 
   // phase === 'community': chat shell. Wait for the connected client + channels.
-  if (!chatClient || Object.keys(channelMap).length === 0) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#fff' }}>
-        <style>{`@keyframes mhms-pulse{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}`}</style>
-        <div>{[0,1,2].map(i => <span key={i} style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#3a55d9', margin: '0 3px', animation: 'mhms-pulse 1.2s infinite', animationDelay: `${i*0.2}s` }} />)}</div>
-      </div>
-    );
-  }
-
-  const activeChannel = channelMap[activeId];
-
-  // Attach real Stream mentions (mentioned_users) when sending, so @name and @everyone
-  // register as genuine mentions. This is what makes the orange @ badge fire live AND
-  // persist across sessions (Stream's countUnreadMentions only counts real mentions).
-  // Our custom autocomplete inserts plain text, so Stream never recorded mentions before.
-  const submitWithMentions = async (messageOrText, channelCid, customMessageData, sendOptions) => {
-    // Stream's submit passes a message object {text, attachments, mentioned_users, parent, ...}
-    const msg = (typeof messageOrText === 'string') ? { text: messageOrText } : (messageOrText || {});
-    const text = msg.text || '';
-    const lower = text.toLowerCase();
-    const ch = activeChannel;
-    if (!ch) return;
-
-    const mentionedIds = new Set();
-
-    // Match @name against the roster (longest names first so full names win).
-    const roster = (rosterMembers || []).slice().sort((a, b) => (b.name || '').length - (a.name || '').length);
-    roster.forEach(u => {
-      if (!u || !u.name) return;
-      if (lower.includes('@' + u.name.toLowerCase())) mentionedIds.add(u.id);
-    });
-
-    // @everyone (instructor only): mention all channel members.
-    if (lower.includes('@everyone') && canPostAnnouncements(currentUser)) {
-      const members = ch.state && ch.state.members ? Object.keys(ch.state.members) : [];
-      members.forEach(id => { if (id !== currentUser?.id) mentionedIds.add(id); });
-    }
-
-    const payload = {
-      ...msg,
-      mentioned_users: Array.from(mentionedIds),
-    };
-    delete payload.parent; // parent is passed separately below for threads
-    try {
-      await ch.sendMessage({ ...payload, parent_id: msg.parent?.id }, sendOptions);
-    } catch (e) {
-      // fall back to a plain send if anything about the mention payload is rejected
-      try { await ch.sendMessage({ text }, sendOptions); } catch (e2) {}
-    }
-  };
 
   return (
-    <div style={{ display: 'flex', height: isMobile ? '100dvh' : '100vh', minHeight: isMobile ? '100dvh' : undefined, fontFamily: "'DM Sans', sans-serif", background: 'radial-gradient(1200px 600px at 80% -10%, #eef1f8 0%, rgba(238,241,248,0) 60%), #e7e9f1', padding: isMobile ? 0 : 14, overflow: 'hidden' }}>
-      {showWelcome && <WelcomeCard name={currentUser?.name} onOpenGuide={() => dismissWelcome(true)} onDismiss={() => dismissWelcome(false)} />}
-      {showWelcomeBack && welcomeBackRecap && (
-        <WelcomeBackSummary
-          recap={welcomeBackRecap}
-          firstName={(currentUser?.name || '').split(' ')[0]}
-          onSelectChannel={handleWelcomeBackChannelClick}
-          onSelectThread={handleWelcomeBackThreadClick}
-          onSelectFeatured={handleWelcomeBackFeaturedClick}
-          onDismiss={dismissWelcomeBack}
-          isMobile={isMobile}
-        />
-      )}
-      {/* v63.1: accessible transient notice when a Featured Update target has vanished. */}
-      {featuredUnavailable && (
-        <div
-          role="status"
-          aria-live="polite"
-          style={{ position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 1200, background: '#181b26', color: '#fff', fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 500, padding: '10px 18px', borderRadius: 10, boxShadow: '0 8px 24px rgba(24,27,38,0.28)' }}
-        >
-          This update is no longer available.
-        </div>
-      )}
-      <div style={{ display: 'flex', flex: 1, background: '#fff', borderRadius: isMobile ? 0 : 18, boxShadow: isMobile ? 'none' : '0 24px 60px rgba(24,27,38,0.14)', overflow: 'hidden', border: isMobile ? 'none' : '1px solid rgba(255,255,255,0.6)', minHeight: 0 }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap');
-        :root{
-          --primary-900:#1d2a63;--primary-700:#2f44b8;--primary-600:#3a55d9;--primary-500:#5872ea;--primary-100:#e6ebfb;--primary-50:#f1f4fe;
-          --ink-900:#181b26;--ink-700:#383d4b;--ink-500:#686e7e;--ink-400:#969cac;--ink-300:#c4c9d4;
-          --line:#e7e9f0;--line-soft:#eef0f5;
-          --canvas:#e7e9f1;--sidebar:#f7f8fb;--surface:#ffffff;--raise:#fbfcfe;
-          --warm:#e07a5f;--gold:#c98a2b;--gold-100:#f8eed6;--green:#2faa6a;
-          --shadow-sm:0 1px 2px rgba(24,27,38,0.05),0 1px 3px rgba(24,27,38,0.04);
-          --shadow-md:0 4px 16px rgba(24,27,38,0.07),0 1px 4px rgba(24,27,38,0.05);
-          --shadow-lg:0 24px 60px rgba(24,27,38,0.14);
-        }
-        @keyframes mhms-pulse{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}
-        .str-chat{height:100%!important;font-family:'DM Sans',sans-serif!important}
-        .str-chat__container{height:100%!important}
-        .str-chat__main-panel{height:100%!important}
-        .str-chat-channel{height:100%!important}
-        .str-chat__channel-header{border-bottom:1px solid var(--line-soft)!important;background:rgba(255,255,255,0.85)!important;backdrop-filter:blur(8px)!important;padding:16px 24px!important;box-shadow:none!important}
-        .str-chat__channel-header-title{font-family:'DM Sans',sans-serif!important;font-weight:700!important;font-size:16px!important;color:var(--ink-900)!important;letter-spacing:0.005em!important}
-        .str-chat__channel-header-info{font-family:'DM Sans',sans-serif!important;font-size:12px!important;color:var(--ink-400)!important}
-        .str-chat__channel-header-menu-button{display:none!important}
-        .str-chat__header-hamburger{display:none!important}
-        .str-chat__message-input{border-top:none!important;background:transparent!important;padding:0!important;box-shadow:none!important}
-        .str-chat__message-textarea-react-host textarea,.str-chat__message-textarea{font-family:'DM Sans',sans-serif!important;font-size:14px!important;border-radius:14px!important;border:1px solid var(--line)!important;background:var(--raise)!important;padding:12px 14px!important;line-height:1.6!important;color:var(--ink-700)!important}
-        .str-chat__message-textarea-react-host textarea:focus,.str-chat__message-textarea:focus{border-color:var(--primary-500)!important;background:var(--surface)!important;outline:none!important;box-shadow:0 0 0 4px rgba(58,85,217,0.08)!important}
-        .str-chat__list{background:var(--surface)!important;padding:8px 0!important}
-        .str-chat__send-button{display:none!important}
-        .str-chat__avatar{display:none!important}
-        .str-chat__message-sender-name{display:none!important}
-        .str-chat__date-separator{display:flex!important;align-items:center!important;padding:16px 18px 12px!important;gap:14px!important}
-        .str-chat__date-separator-line{flex:1!important;height:1px!important;background:var(--line-soft)!important;border:none!important}
-        .str-chat__date-separator-date{font-family:'DM Sans',sans-serif!important;font-size:11px!important;font-weight:600!important;color:var(--ink-400)!important;letter-spacing:0.04em!important;text-transform:uppercase!important;background:transparent!important;padding:0!important}
-        .str-chat__jump-to-latest-message,.str-chat__scroll-to-bottom-button{position:absolute!important;bottom:16px!important;right:20px!important;z-index:50!important}
-        .str-chat__scroll-to-bottom-button button,.str-chat__jump-to-latest-message button{background:linear-gradient(135deg,var(--primary-600),var(--primary-700))!important;color:#fff!important;border-radius:20px!important;box-shadow:0 6px 18px rgba(58,85,217,0.32)!important;font-family:'DM Sans',sans-serif!important;border:none!important}
-        @media (max-width: 768px){
-          .str-chat__channel-header{padding-left:62px!important}
-          .cats-wiki{padding-top:64px!important}
-          /* On mobile, a thread takes over the full screen instead of splitting it */
-          .str-chat__thread{position:fixed!important;inset:0!important;width:100vw!important;max-width:100vw!important;height:100%!important;z-index:1200!important;background:#fff!important;margin:0!important;border-radius:0!important;box-shadow:none!important}
-          .str-chat__thread .str-chat__thread-header{padding:16px!important;border-bottom:1px solid #eef0f5!important}
-          /* Make sure the main message list isn't hidden behind anything when no thread is open */
-          .str-chat__main-panel{width:100%!important}
-        }
-      `}</style>
-      <Sidebar groups={APP_CONFIG.channelGroups} activeId={activeId} onSelect={handleChannelSelect} currentUser={currentUser} chatClient={chatClient} activeChannel={activeChannel} onEditProfile={() => controller.editProfile()} onLogout={() => controller.logout()} unreadCounts={unreadCounts} mentionCounts={mentionCounts} isMobile={isMobile} mobileNavOpen={mobileNavOpen} onCloseMobileNav={() => setMobileNavOpen(false)} />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', minHeight: 0, minWidth: 0 }}>
-        {/* Persistent live-consult bar, visible across all channels */}
-        <a href={APP_CONFIG.consult.link} target="_blank" rel="noopener noreferrer"
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, flexShrink: 0, background: 'linear-gradient(135deg, #3a55d9 0%, #2f44b8 100%)', color: '#fff', textDecoration: 'none', fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600, padding: '9px 16px', letterSpacing: '0.01em' }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{isMobile ? 'Live consults · every other week · 6pm MST' : 'Live consultations with Dr. Mayfield, every other week at 6pm MST (7pm CST / 8pm EST / 5pm PST). Full schedule in Getting Started.'}</span>
-          <span style={{ background: 'rgba(255,255,255,0.2)', borderRadius: 6, padding: '2px 9px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 }}>Join link</span>
-        </a>
-        {isMobile && !mobileNavOpen && (
-          <button onClick={() => setMobileNavOpen(true)} title="Open menu"
-            style={{ position: 'absolute', top: 50, left: 12, zIndex: 70, background: '#fff', border: '1px solid #e8e8e8', borderRadius: 8, width: 38, height: 38, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, cursor: 'pointer', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
-            <span style={{ width: 16, height: 2, background: '#444', borderRadius: 2 }} />
-            <span style={{ width: 16, height: 2, background: '#444', borderRadius: 2 }} />
-            <span style={{ width: 16, height: 2, background: '#444', borderRadius: 2 }} />
-          </button>
-        )}
-        {STATIC_CHANNELS.includes(activeId) ? (
-          <GettingStartedWiki />
-        ) : activeChannel && (
-          <Chat client={chatClient} theme="str-chat__theme-light">
-            <Channel
-              channel={activeChannel}
-              EmptyStateIndicator={() => <ChannelEmptyState channelId={activeId} onJump={handleChannelSelect} />}
-              ThreadHeader={threadHeaderProps => (
-                <CatsThreadHeader
-                  {...threadHeaderProps}
-                  onClose={() => runtime.activeThreadChanged(null)}
-                />
-              )}
-            >
-              <Window>
-                <div style={{ position: 'relative' }}>
-                  <ChannelHeader />
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: 13,
-                      right: 24,
-                      zIndex: 60,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                    }}
-                  >
-                    <ThreadNoteBell
-                      notes={threadNotes}
-                      onSelect={handleThreadNoteClick}
-                    />
-                    <ChannelSearchPanel channel={activeChannel} />
-                  </div>
-                </div>
-                <MessageList Message={CustomMessage} disableDateSeparator={false} returnAllReadData={false} />
-                <div style={{ position: 'relative' }}>
-                  <TypingIndicator />
-                  {(activeId !== ANNOUNCEMENTS_ID || canPostAnnouncements(currentUser)) ? (
-                  <div style={{ display: 'flex', alignItems: 'flex-end', borderTop: '1px solid #eef0f5', background: '#fff', padding: '10px 16px', gap: 8, position: 'relative' }}>
-                    <MentionAutocomplete members={rosterMembers} canMentionEveryone={canPostAnnouncements(currentUser)} />
-                    <EmojiButton onEmojiSelect={(emoji) => {
-                      const textarea = document.querySelector('.str-chat__message-textarea-react-host textarea, .str-chat__message-textarea');
-                      if (textarea) {
-                        const start = textarea.selectionStart;
-                        const end = textarea.selectionEnd;
-                        const before = textarea.value.slice(0, start);
-                        const after = textarea.value.slice(end);
-                        const newVal = before + emoji + after;
-                        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-                        setter.call(textarea, newVal);
-                        textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                        setTimeout(() => { textarea.focus(); textarea.setSelectionRange(start + emoji.length, start + emoji.length); }, 0);
-                      }
-                    }} />
-                    <div style={{ flex: 1 }}>
-                      <MessageInput grow={true} minRows={isMobile ? 1 : 5} maxRows={isMobile ? 6 : 12} overrideSubmitHandler={submitWithMentions} />
-                    </div>
-                    <button title="Send" onClick={() => {
-                      const ta = document.querySelector('.str-chat__message-textarea-react-host textarea, .str-chat__message-textarea');
-                      if (ta && ta.value.trim()) {
-                        ta.focus();
-                        ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-                      }
-                    }}
-                      style={{ width: 40, height: 40, flexShrink: 0, borderRadius: 11, border: 'none', cursor: 'pointer', background: 'linear-gradient(135deg,#3a55d9,#2f44b8)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(58,85,217,0.32)', alignSelf: 'flex-end', marginBottom: 1, transition: 'transform 0.12s ease' }}
-                      onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-1px)'}
-                      onMouseLeave={e => e.currentTarget.style.transform = 'none'}>
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13"></path><path d="M22 2 15 22l-4-9-9-4 20-7z"></path></svg>
-                    </button>
-                  </div>
-                  ) : (
-                    <div style={{ borderTop: '1px solid #ebebeb', background: '#fafafa', padding: '14px 16px', textAlign: 'center', fontSize: 12.5, color: '#999', fontFamily: "'DM Sans', sans-serif" }}>
-                      📣 Only the instructor can post in Announcements. Head to General to join the conversation.
-                    </div>
-                  )}
-                  {(activeId !== ANNOUNCEMENTS_ID || canPostAnnouncements(currentUser)) && (
-                    <div style={{ textAlign: 'center', fontSize: 11.5, fontWeight: 600, color: '#969cac', fontFamily: "'DM Sans', sans-serif", padding: '9px 16px 4px', letterSpacing: '0.005em' }}>
-                      Type @ to mention someone in the group · @mark or @dr. mark mayfield reaches Dr. Mayfield · @support reaches tech support
-                    </div>
-                  )}
-                </div>
-              </Window>
-              <Thread
-                additionalMessageInputProps={{
-                  grow: true,
-                  minRows: isMobile ? 1 : 5,
-                  maxRows: isMobile ? 6 : 12,
-                }}
-              />
-
-              <ThreadJumpHandler
-                pendingThread={pendingThread}
-                activeId={activeId}
-                channel={activeChannel}
-                onOpened={() => {
-                  // The runtime owns openThreadId + note reconciliation via activeThreadChanged;
-                  // both terminal outcomes only resolve the pending cross-channel jump.
-                  runtime.resolveThreadJump();
-                }}
-                onFailed={() => {
-                  // Leave the bell notification intact so the user can retry; clear only the
-                  // pending automatic jump to prevent a retry loop.
-                  runtime.resolveThreadJump();
-                }}
-              />
-
-              <ActiveThreadWatcher
-                onActiveThreadChanged={runtime.activeThreadChanged}
-                channel={activeChannel}
-              />
-
-              <FeaturedUpdateJumpHandler
-                pendingFeatured={pendingFeatured}
-                activeId={activeId}
-                channel={activeChannel}
-                onDone={runtime.completeFeaturedJump}
-                onUnavailable={runtime.markFeaturedUnavailable}
-              />
-            </Channel>
-          </Chat>
-        )}
-      </div>
-      </div>
-    </div>
+    <CommunityDestination
+      runtime={runtime}
+      currentUser={currentUser}
+      isMobile={isMobile}
+      mobileNavOpen={mobileNavOpen}
+      setMobileNavOpen={setMobileNavOpen}
+      rosterMembers={rosterMembers}
+      onEditProfile={() => controller.editProfile()}
+      onLogout={() => controller.logout()}
+      onSelectChannel={handleChannelSelect}
+      onThreadNoteClick={handleThreadNoteClick}
+      welcome={{ show: showWelcome, onOpenGuide: () => dismissWelcome(true), onDismiss: () => dismissWelcome(false) }}
+      welcomeBack={{
+        show: showWelcomeBack,
+        recap: welcomeBackRecap,
+        onSelectChannel: handleWelcomeBackChannelClick,
+        onSelectThread: handleWelcomeBackThreadClick,
+        onSelectFeatured: handleWelcomeBackFeaturedClick,
+        onDismiss: dismissWelcomeBack,
+      }}
+    />
   );
 }
 
