@@ -49,6 +49,7 @@ import { MHMS_ORG_CONFIG } from './orgConfig';
 import { readLegacyUiHints } from './legacyStorage';
 import { profileFormInitial } from './profileForm';
 import { usePlatformRuntime } from './platformRuntime';
+import { PlatformShell } from './platformShell';
 
 // Load emoji-mart from CDN at runtime
 let emojiMartPromise = null;
@@ -2505,6 +2506,7 @@ function App() {
   // phase === 'community': chat shell. Wait for the connected client + channels.
 
   return (
+    <PlatformShell>
     <CommunityDestination
       runtime={runtime}
       currentUser={currentUser}
@@ -2526,6 +2528,7 @@ function App() {
         onDismiss: dismissWelcomeBack,
       }}
     />
+    </PlatformShell>
   );
 }
 
