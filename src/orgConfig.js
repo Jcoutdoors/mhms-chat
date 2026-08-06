@@ -149,4 +149,15 @@ function resolveCopy(config, key) {
   return fill(base).replace(/\{assistant\}/g, assistant);
 }
 
-module.exports = { MHMS_ORG_CONFIG, assistantEnabled, assistantAvatarSources, resolveCopy };
+// Fills {org}/{community} tokens in an arbitrary configured string using the same substitution
+// resolveCopy applies to `copy` keys. For organization strings that live OUTSIDE the `copy` map
+// (e.g. home.heading), so callers never duplicate token-replacement logic. No assistant-token
+// handling — these are plain org strings, not assistant-voiced copy. Non-strings resolve to ''.
+function resolveOrgText(config, text) {
+  if (typeof text !== 'string') return '';
+  const org = (config && config.orgName) || 'the community';
+  const community = (config && config.communityLabel) || org;
+  return text.replace(/\{org\}/g, org).replace(/\{community\}/g, community);
+}
+
+module.exports = { MHMS_ORG_CONFIG, assistantEnabled, assistantAvatarSources, resolveCopy, resolveOrgText };

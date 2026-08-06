@@ -93,25 +93,30 @@ test('12. current consultation wording is unchanged', () => {
   assert.ok(INDEX.includes('target="_blank" rel="noopener noreferrer"'), 'link rel attributes intact');
 });
 
-test('13. PlatformShell remains a stateless Fragment boundary (contract unchanged)', () => {
-  const body = fnBody(SHELL, 'PlatformShell');
-  assert.ok(/return\s*<>\{children\}<\/>/.test(body.replace(/\s+/g, ' ')), 'renders a Fragment');
-  for (const banned of ['useState', 'useEffect', 'useRef']) assert.equal(SHELL.includes(banned), false, `no ${banned}`);
-  // imports only React
-  const imports = (SHELL.match(/^import .*/gm) || []);
-  assert.deepEqual(imports, ["import React from 'react';"], 'PlatformShell imports only React');
+// NOTE (Slice 4): the former Slice-3 guards "PlatformShell is a stateless Fragment", "no
+// HomeDestination", and "no activeDestination" are intentionally superseded — Slice 4 adds
+// destination selection + Home. The invariants that still matter for the config migration are
+// preserved below (runtime stays App-owned; Home takes no runtime); full shell/Home behavior is
+// covered by platformShell.test.mjs and homeDestination.test.mjs.
+test('13. the runtime stays App-owned — shell/Home import no runtime module', () => {
+  assert.equal(/platformRuntime|usePlatformRuntime/.test(SHELL), false, 'PlatformShell has no runtime');
+  const HOME = readFileSync(new URL('./homeDestination.jsx', import.meta.url), 'utf8');
+  assert.equal(/platformRuntime|usePlatformRuntime/.test(HOME), false, 'HomeDestination has no runtime');
 });
 
-test('14. no HomeDestination exists yet', () => {
-  assert.equal(/function\s+HomeDestination\s*\(/.test(INDEX + SHELL), false);
+test('14. HomeDestination exists as a dedicated module (Slice 4)', () => {
+  const HOME = readFileSync(new URL('./homeDestination.jsx', import.meta.url), 'utf8');
+  assert.ok(/export function HomeDestination\(/.test(HOME), 'HomeDestination is its own module');
 });
 
 test('15. no ShellHeader exists yet', () => {
   assert.equal(/function\s+ShellHeader\s*\(/.test(INDEX + SHELL), false);
 });
 
-test('16. no activeDestination state exists', () => {
-  assert.equal(/activeDestination/.test(INDEX + SHELL), false);
+test('16. destination state is owned by PlatformShell, not App (index.jsx)', () => {
+  const app = fnBody(INDEX, 'App');
+  assert.equal(app.includes('activeDestination'), false, 'App holds no destination state');
+  assert.ok(/activeDestination/.test(SHELL), 'PlatformShell owns activeDestination');
 });
 
 test('17. no visible destination navigation exists', () => {
