@@ -86,6 +86,27 @@ const MHMS_ORG_CONFIG = {
     emailBody: "Use the email connected to your {org} registration. We'll send you a six-digit code.",
     codeBody: 'Enter the six-digit code we sent you.',
   },
+  // Platform Navigation & Home Foundation — Stage 2. Organization-level shell/Home data,
+  // kept in this seam so reusable shell components never hardcode org-specific values.
+  // `destinations` and `home` are consumed starting in a later slice (Home is not built
+  // yet); `home` copy uses the same {org}/{community} tokens resolveCopy already fills.
+  destinations: [
+    { id: 'home', label: 'Home' },
+    { id: 'community', label: 'Community' },
+  ],
+  home: {
+    heading: 'Welcome to the {community}',
+    supporting: 'Your cohort home base. Jump into the conversation anytime.',
+    goToCommunityLabel: 'Go to Community',
+  },
+  // Recurring Zoom consultation (migrated from APP_CONFIG in Stage 2 Slice 3 so it has a
+  // single organization-level source of truth). Update `dates` each term and `link` if it
+  // ever changes. Rendered by the Getting Started card and the persistent consult bar.
+  consult: {
+    link: 'https://ccu.zoom.us/j/2303075413',
+    time: '6pm MST (7pm CST / 8pm EST / 5pm PST)',
+    dates: ['Jun 10', 'Jun 24', 'Jul 8', 'Jul 22', 'Aug 5', 'Aug 19'],
+  },
 };
 
 // Returns true iff the config enables an assistant persona.
