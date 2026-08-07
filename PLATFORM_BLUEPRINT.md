@@ -29,9 +29,9 @@ If implementation and this Blueprint ever conflict, the conflict should be ident
 
 # **Vision**
 
-To build the most trusted platform for organizations that guide people through meaningful learning experiences.
+To build the most trusted platform for organizations that intentionally develop people, coordinate meaningful work, and create connected experiences.
 
-The platform should make it easier for organizations to create communities that educate, support, and develop people without requiring a collection of disconnected tools or unnecessary technical complexity.
+The platform should make it easier for organizations to bring together the people, knowledge, learning, communication, work, and support they need without requiring a collection of disconnected tools or unnecessary technical complexity.
 
 Technology should quietly enable the experience rather than becoming the experience.
 
@@ -39,11 +39,11 @@ Technology should quietly enable the experience rather than becoming the experie
 
 # **Mission**
 
-The Collier Platform exists to help organizations build healthier learning communities by combining structured education, meaningful conversation, practical tools, and intelligent assistance into a single cohesive experience.
+The Collier Platform exists to help organizations create healthier, more connected environments by bringing together learning, meaningful conversation, practical work, shared knowledge, and intelligent assistance in a single cohesive experience.
 
-Our goal is not simply to help organizations teach.
+Our goal is not simply to help organizations teach, communicate, or manage work.
 
-Our goal is to help them guide people through meaningful transformation.
+Our goal is to help them guide people, strengthen relationships, coordinate meaningful work, and support progress over time.
 
 ---
 
@@ -85,7 +85,7 @@ Most software treats those experiences as separate products.
 
 We believe they belong together.
 
-The platform exists to unify the complete cohort experience without overwhelming the organizations that use it.
+The platform exists to unify the connected organizational experience without overwhelming the organizations or people that use it.
 
 ---
 
@@ -125,9 +125,11 @@ We believe simplicity requires discipline.
 
 # **Product Identity**
 
-The Collier Platform is a configurable cohort platform.
+The Collier Platform is a configurable organizational platform.
 
-It combines learning, community, communication, and intelligent assistance into a single integrated experience.
+It brings together capabilities such as community, workspace, learning, communication,
+productivity, intelligent assistance, and future organization-specific capabilities into a
+cohesive operating environment.
 
 It is not simply chat.
 
@@ -135,7 +137,34 @@ It is not simply a course platform.
 
 It is not simply a community.
 
-It is the operating system for organizations that guide people through structured learning experiences.
+It is not simply a productivity application.
+
+It is the operating environment for organizations that guide people, coordinate work, share
+knowledge, build relationships, and support structured growth.
+
+The platform maintains three distinct, separable identity layers:
+
+1. **Platform identity**
+   The current working commercial product name is **Anchor**.
+   Anchor is provisional and has not yet been legally or commercially cleared as final.
+   Historical and internal "Collier Platform" naming may remain in repositories,
+   infrastructure, technical identifiers, and architecture history until the commercial
+   name is finalized. No repository-wide rename is authorized by this documentation update.
+
+2. **Organization identity**
+   Example: Mental Health Made Simple / CATS.
+   Configured per deployment and never assumed by reusable platform code.
+
+3. **Assistant identity**
+   Example: ATLAS for MHMS.
+   Configured per organization. Platform code must never hardcode the assistant name or
+   assume every organization enables an assistant. (This is already consistent with the
+   Artificial Intelligence Philosophy section below, which states the platform has no
+   built-in assistant named ATLAS — Mental Health Made Simple does.)
+
+These identity layers must remain independently configurable. Architecture must preserve
+the ability for platform branding to be visible, subtle, removable, or fully white-labeled
+in future commercial models.
 
 ---
 
@@ -359,18 +388,42 @@ The platform is composed of independent capabilities that work together to creat
 
 Major capabilities include:
 
-* Identity  
-* Community  
-* Learning  
-* Artificial Intelligence  
-* Notifications  
-* Analytics  
-* Administration  
+* Identity
+* Community
+* Workspace
+* Learning
+* Artificial Intelligence
+* Notifications
+* Analytics
+* Administration
 * Integrations
+
+Top-level navigation destinations do not have to map one-to-one to major capability
+domains. A capability domain may surface more than one direct navigation destination
+when doing so improves discoverability, without becoming a separate architectural
+domain. (Notes and Tasks are the current example: both may appear as direct navigation
+destinations while remaining modules owned by the Workspace capability domain.)
 
 Capabilities should remain loosely coupled whenever practical.
 
 Features should strengthen existing capabilities before introducing new ones.
+
+### Workspace and the Productivity Boundary
+
+Workspace is the platform's productivity capability domain and includes, over time:
+files, folders, documents, connected storage such as Google Drive, notes, tasks, recent
+work, shared work, collaborative work, and related productivity tools.
+
+The platform should not attempt to recreate mature general-purpose productivity suites
+feature-for-feature where established integrations provide a better experience. Native
+productivity experiences may be built where they materially improve the connected
+platform workflow.
+
+The platform should own the workflows, context, permissions, and connections that tie
+productivity to Community, Learning, AI, and the platform's other capabilities. External
+providers should remain replaceable integrations wherever practical: providers should
+supply replaceable infrastructure where appropriate; the platform should retain ownership
+of its business logic and product experience.
 
 ---
 
@@ -414,11 +467,11 @@ If the answer to most of these questions is no, the work should be reconsidered.
 
 # **Success**
 
-The platform succeeds when organizations spend less time managing software and more time serving people.
+The platform succeeds when organizations spend less time managing disconnected software and more time serving people and doing meaningful work.
 
-It succeeds when communities become healthier because the technology quietly supports the experience rather than distracting from it.
+It succeeds when communities, teams, and working relationships become healthier because the technology quietly supports the experience rather than distracting from it.
 
-It succeeds when organizations can confidently build meaningful learning experiences without needing a team of developers to support them.
+It succeeds when organizations can confidently create connected experiences for learning, communication, knowledge, and work without needing a team of developers to support them.
 
 ---
 
@@ -454,11 +507,11 @@ We will not compromise trust for growth.
 
 # **Closing Principle**
 
-The Collier Platform exists to help people learn together.
+The Collier Platform exists to help organizations bring people, knowledge, learning, relationships, and meaningful work together.
 
-Every feature, every architectural decision, every release, and every line of code should ultimately serve that purpose.
+Every feature, every architectural decision, every release, and every line of code should ultimately strengthen that connected experience.
 
-If a decision strengthens learning, strengthens community, and strengthens the platform, it is likely the right decision.
+If a decision helps people learn, work, communicate, connect, or make meaningful progress while strengthening the platform, it is likely the right decision.
 
 If it does not, we should have the discipline not to build it.
 

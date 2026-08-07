@@ -8,6 +8,13 @@ any new conversation starts with full context. **Current version: v63 live in pr
 built files both. v61 absorbed the previously-uncommitted v60 work (clickable mailto links +
 two wiki sections), so that gap is closed; nothing is pending re-application. Standing
 notes for the next session:
+- Stage 3 (Neural Canvas / Anchor product direction) planning is underway. Workspace is
+ now a recognized major platform capability (see PLATFORM_BLUEPRINT.md). Stage 3's
+ first implementation slice is split into a theme/token foundation and a global
+ shell + navigation accessibility slice (the latter including the Stage 2 focus/
+ aria-live debt closure — see TECHNICAL_DEBT.md). Implementation has not yet started.
+ See ARCHITECTURE_DECISIONS.md ADR-0002 through ADR-0004 for the assistant-placement,
+ Home-IA, and typography decisions made ahead of implementation.
 - The Atlas AI agent is BUILT but ON HOLD and intentionally NOT in the repo. Jonathan wants to
  flesh out Atlas's scope before committing or wiring anything. Do not start Atlas work unless
  he raises it. See the Atlas section for why holding is deliberate (scope growth may require

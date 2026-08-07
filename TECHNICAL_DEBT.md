@@ -220,3 +220,15 @@ These remained **unperformed** during Stage 1 connected validation and are **not
 as passed. **This is a validation-capability gap, not a current release blocker.** A dedicated
 safe fault-injection / preview capability would close it; related to the absence of a
 dev/sandbox Stream app noted above.
+
+## Stage 2 — destination-change focus management and aria-live announcements (deferred; scheduled for closure in Stage 3's global shell/navigation slice)
+
+`platformShell.jsx` explicitly deferred destination-change focus management and
+aria-live announcements during Stage 2 Slice 5 ("a later, separately scoped concern").
+This is accepted, intentional debt at the time it was written — the shell had exactly
+two destinations and no collapsible sidebar.
+
+Stage 3's global shell/navigation work is scoped to close this gap, not defer it to a
+separate later hardening pass. Remove this entry once that slice ships and tests cover
+destination-change focus management and aria-live behavior. Do not leave a stale
+resolved entry behind.

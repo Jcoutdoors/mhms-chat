@@ -1,3 +1,13 @@
+## Stage 3 pre-implementation reconciliation (documentation-only, 2026-08-07)
+
+Product/architecture decisions for Stage 3 (Workspace as a major capability, the
+theme/shell slice split, assistant placement, Home IA, typography defaults) were
+reconciled between Claude Project and ChatGPT and recorded in PLATFORM_BLUEPRINT.md and
+ARCHITECTURE_DECISIONS.md (ADR-0002–0004). No source code changed. Implementation
+begins after this commit is merged and Jonathan authorizes it.
+
+---
+
 # Stage 1 Review Handoff — Platform Navigation & Home Foundation: persistent connected runtime (2026-08-05)
 
 Stage 1 extracts the persistent connected Community runtime into `usePlatformRuntime`
