@@ -4,14 +4,14 @@ import { resolveOrgText } from './orgConfig.js';
 // HomeDestination (Stage 2 Slice 4) — the minimal Home foundation surface. Presentation only:
 // it renders an organization-configured heading, supporting copy, and one primary action that
 // returns to Community. It receives NO runtime, Stream client, channel/unread/thread state, auth
-// controller, or auth state — only `config`, `currentUser` (reserved for future personalization;
-// unused until an approved config field supports it), and the `onGoToCommunity` callback.
+// controller, or auth state — only `config` and the `onGoToCommunity` callback (the smallest prop
+// contract it actually uses; a user prop is added later only when an approved Home need requires it).
 //
 // Copy is resolved through the shared orgConfig token-fill (resolveOrgText), so no org-specific
 // wording is hardcoded here. This is a foundation, not the final Home experience: no cards,
 // dashboards, activity/unread/featured summaries, consultation widgets, assistant surface, tasks,
 // learning progress, icons, imagery, or animation.
-export function HomeDestination({ config, currentUser, onGoToCommunity }) {
+export function HomeDestination({ config, onGoToCommunity }) {
   const home = (config && config.home) || {};
   const heading = resolveOrgText(config, home.heading || '');
   const supporting = resolveOrgText(config, home.supporting || '');

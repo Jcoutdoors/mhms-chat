@@ -95,7 +95,8 @@ test('24. the runtime stays App-owned (not created in shell or Home)', () => {
 
 test('25. CommunityDestination still receives the same prop contract', () => {
   const app = fnBody(INDEX, 'App');
-  assert.ok(/<PlatformShell config=\{orgConfig\} homeProps=\{\{ currentUser \}\}>/.test(app), 'shell receives config + homeProps');
+  assert.ok(/<PlatformShell config=\{orgConfig\}>/.test(app), 'shell receives only config (no homeProps/user seam)');
+  assert.equal(app.includes('homeProps'), false, 'App passes no homeProps');
   for (const prop of ['runtime={runtime}', 'onEditProfile={() => controller.editProfile()}', 'onLogout={() => controller.logout()}', 'onSelectChannel={handleChannelSelect}']) {
     assert.ok(app.includes(prop), `CommunityDestination still passed ${prop}`);
   }

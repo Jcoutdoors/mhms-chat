@@ -36,10 +36,11 @@ test('4. HomeDestination hardcodes no organization-specific terms', () => {
 });
 
 test('5. HomeDestination accepts only the minimal approved props', () => {
-  assert.ok(/export function HomeDestination\(\{\s*config,\s*currentUser,\s*onGoToCommunity\s*\}\)/.test(HOME),
-    'props are exactly { config, currentUser, onGoToCommunity }');
+  assert.ok(/export function HomeDestination\(\{\s*config,\s*onGoToCommunity\s*\}\)/.test(HOME),
+    'props are exactly { config, onGoToCommunity }');
   const body = fnBody(HOME, 'HomeDestination'); // scope to code, not the doc comment
-  for (const banned of ['runtime', 'chatClient', 'channelMap', 'unreadCounts', 'threadNotes', 'controller', 'pendingThread']) {
+  // currentUser was removed — Home has no user dependency until an approved need requires it.
+  for (const banned of ['currentUser', 'runtime', 'chatClient', 'channelMap', 'unreadCounts', 'threadNotes', 'controller', 'pendingThread']) {
     assert.equal(body.includes(banned), false, `HomeDestination does not take/use ${banned}`);
   }
 });
