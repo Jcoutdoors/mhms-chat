@@ -29,9 +29,9 @@ If implementation and this Blueprint ever conflict, the conflict should be ident
 
 # **Vision**
 
-To build the most trusted platform for organizations that guide people through meaningful learning experiences.
+To build the most trusted platform for organizations that intentionally develop people, coordinate meaningful work, and create connected experiences.
 
-The platform should make it easier for organizations to create communities that educate, support, and develop people without requiring a collection of disconnected tools or unnecessary technical complexity.
+The platform should make it easier for organizations to bring together the people, knowledge, learning, communication, work, and support they need without requiring a collection of disconnected tools or unnecessary technical complexity.
 
 Technology should quietly enable the experience rather than becoming the experience.
 
@@ -39,11 +39,11 @@ Technology should quietly enable the experience rather than becoming the experie
 
 # **Mission**
 
-The Collier Platform exists to help organizations build healthier learning communities by combining structured education, meaningful conversation, practical tools, and intelligent assistance into a single cohesive experience.
+The Collier Platform exists to help organizations create healthier, more connected environments by bringing together learning, meaningful conversation, practical work, shared knowledge, and intelligent assistance in a single cohesive experience.
 
-Our goal is not simply to help organizations teach.
+Our goal is not simply to help organizations teach, communicate, or manage work.
 
-Our goal is to help them guide people through meaningful transformation.
+Our goal is to help them guide people, strengthen relationships, coordinate meaningful work, and support progress over time.
 
 ---
 
@@ -85,7 +85,7 @@ Most software treats those experiences as separate products.
 
 We believe they belong together.
 
-The platform exists to unify the complete cohort experience without overwhelming the organizations that use it.
+The platform exists to unify the connected organizational experience without overwhelming the organizations or people that use it.
 
 ---
 
@@ -467,11 +467,11 @@ If the answer to most of these questions is no, the work should be reconsidered.
 
 # **Success**
 
-The platform succeeds when organizations spend less time managing software and more time serving people.
+The platform succeeds when organizations spend less time managing disconnected software and more time serving people and doing meaningful work.
 
-It succeeds when communities become healthier because the technology quietly supports the experience rather than distracting from it.
+It succeeds when communities, teams, and working relationships become healthier because the technology quietly supports the experience rather than distracting from it.
 
-It succeeds when organizations can confidently build meaningful learning experiences without needing a team of developers to support them.
+It succeeds when organizations can confidently create connected experiences for learning, communication, knowledge, and work without needing a team of developers to support them.
 
 ---
 
@@ -507,11 +507,11 @@ We will not compromise trust for growth.
 
 # **Closing Principle**
 
-The Collier Platform exists to help people learn together.
+The Collier Platform exists to help organizations bring people, knowledge, learning, relationships, and meaningful work together.
 
-Every feature, every architectural decision, every release, and every line of code should ultimately serve that purpose.
+Every feature, every architectural decision, every release, and every line of code should ultimately strengthen that connected experience.
 
-If a decision strengthens learning, strengthens community, and strengthens the platform, it is likely the right decision.
+If a decision helps people learn, work, communicate, connect, or make meaningful progress while strengthening the platform, it is likely the right decision.
 
 If it does not, we should have the discipline not to build it.
 
