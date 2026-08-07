@@ -124,10 +124,11 @@ test('16. destination state is owned by PlatformShell, not App (index.jsx)', () 
 });
 
 test('17. destination navigation is organization-config-driven (single source), not hardcoded', () => {
-  // Slice 5 adds visible navigation; its labels must come from MHMS_ORG_CONFIG.destinations — the same
-  // single organization source this migration established — with no second navigation configuration.
-  const HEADER = readFileSync(new URL('./shellHeader.jsx', import.meta.url), 'utf8');
-  assert.ok(/config\.destinations/.test(HEADER), 'ShellHeader reads config.destinations');
+  // The primary destination navigation (the GlobalSidebar as of Slice 1b) draws its entries from
+  // MHMS_ORG_CONFIG.destinations — the single organization source this migration established — with no
+  // second navigation configuration on the org config.
+  const SIDEBAR = readFileSync(new URL('./globalSidebar.jsx', import.meta.url), 'utf8');
+  assert.ok(/config\.destinations/.test(SIDEBAR), 'GlobalSidebar reads config.destinations');
   assert.deepEqual(MHMS_ORG_CONFIG.destinations.map((d) => d.id), ['home', 'community'], 'unchanged destination ids');
   for (const banned of ['routes', 'navItems', 'navigation', 'menu']) {
     assert.equal(JSON.stringify(MHMS_ORG_CONFIG).includes(banned), false, `no second navigation config field: ${banned}`);

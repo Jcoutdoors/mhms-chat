@@ -1,68 +1,85 @@
 import React from 'react';
 
-// ShellHeader (Stage 2 Slice 5) — the persistent platform chrome. Presentation-only: it shows the
-// organization identity and the Home/Community destination navigation, and reports selections up
-// through onSelectDestination. It owns NO destination state (PlatformShell does) and takes NO runtime,
-// Stream client, auth controller/state, channel/unread/thread state, or profile/logout callbacks.
+// ShellHeader (Stage 3 Slice 1b) — the top UTILITY header. As of the global-shell slice it is NO LONGER
+// the primary destination switcher (Home/Community moved to the GlobalSidebar). Its role is global
+// utility: the sidebar toggle, a compact current-area context label, and a secondary Help shortcut.
+// Presentation-only: it owns no state, takes no runtime/auth/Stream dependency, and does NOT duplicate
+// the primary destination navigation.
 //
-// Navigation entries come from config.destinations — the single organization source of truth — so no
-// destination (Home/Community) is hardcoded here and the shell stays organization-agnostic. Identity
-// text comes from config.orgName; the active-state accent uses config.brandColor. No logo/avatar mark
-// is baked in.
-//
-// Semantics: a <header> containing the identity and a <nav aria-label="Primary"> with one <button> per
-// destination. The active destination is exposed with aria-current="page" (exactly one at a time).
-// There is no routing yet, so these are real buttons — no href, hash, router Link, or History API — and
-// there is no URL/hash/history/storage behavior. Destination-change focus management and aria-live
-// announcements are deliberately NOT here (they are a later, separately scoped concern).
-export function ShellHeader({ config, activeDestination, onSelectDestination }) {
-  const destinations = (config && Array.isArray(config.destinations)) ? config.destinations : [];
+// The toggle controls the global sidebar (collapse on desktop / open the drawer on mobile). It exposes
+// aria-expanded + aria-controls (pointing at the sidebar/drawer) and receives a ref from PlatformShell
+// so focus can return to it when the mobile drawer closes. Colors/typography come from --platform-*
+// tokens; the focus ring is the Slice 1a --platform-focus-ring.
+
+function ToggleIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" aria-hidden="true" focusable="false">
+      <path d="M4 6h16M4 12h16M4 18h16" />
+    </svg>
+  );
+}
+
+export function ShellHeader({ config, activeLabel, navExpanded, navControlsId, isMobile, onToggleSidebar, toggleRef }) {
   const orgName = (config && config.orgName) || '';
-  const brandColor = (config && config.brandColor) || '#3b73d8';
+  const supportContact = (config && config.supportContact) || '';
+  const toggleLabel = isMobile
+    ? (navExpanded ? 'Close navigation' : 'Open navigation')
+    : (navExpanded ? 'Collapse navigation' : 'Expand navigation');
 
   return (
     <header
       style={{
         flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        gap: 16, height: 56, padding: '0 16px', boxSizing: 'border-box',
+        gap: 12, height: 56, padding: '0 12px 0 8px', boxSizing: 'border-box',
         background: 'var(--platform-header-background, #fff)',
         borderBottom: '1px solid var(--platform-header-border, #eef0f5)',
         fontFamily: "var(--platform-font-body, 'DM Sans', sans-serif)",
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+        <button
+          ref={toggleRef}
+          type="button"
+          onClick={onToggleSidebar}
+          aria-label={toggleLabel}
+          aria-expanded={!!navExpanded}
+          aria-controls={navControlsId}
+          style={{
+            flexShrink: 0, width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            border: 'none', borderRadius: 9, cursor: 'pointer', background: 'transparent',
+            color: 'var(--platform-text-secondary, #4a4f5e)',
+          }}
+        >
+          <ToggleIcon />
+        </button>
+        {/* Compact current-area context (not navigation — the primary nav lives in the sidebar). */}
         <span
           style={{
             fontSize: 15, fontWeight: 700, color: 'var(--platform-text-primary, #181b26)',
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           }}
         >
-          {orgName}
+          {activeLabel || orgName}
         </span>
       </div>
-      <nav aria-label="Primary" style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-        {destinations.map((d) => {
-          const isActive = d.id === activeDestination;
-          return (
-            <button
-              key={d.id}
-              type="button"
-              aria-current={isActive ? 'page' : undefined}
-              onClick={() => onSelectDestination(d.id)}
-              style={{
-                cursor: 'pointer', border: 'none', borderRadius: 8,
-                minHeight: 44, padding: '9px 15px',
-                fontFamily: "var(--platform-font-body, 'DM Sans', sans-serif)",
-                fontSize: 14, fontWeight: isActive ? 700 : 600,
-                background: isActive ? `var(--platform-accent, ${brandColor})` : 'transparent',
-                color: isActive ? 'var(--platform-text-on-accent, #fff)' : 'var(--platform-text-secondary, #4a4f5e)',
-              }}
-            >
-              {d.label}
-            </button>
-          );
-        })}
-      </nav>
+      {/* Secondary Help access (primary Help lives in the sidebar utility area). */}
+      <a
+        href={supportContact ? `mailto:${supportContact}` : undefined}
+        aria-label="Help"
+        style={{
+          flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 40, padding: '0 12px',
+          borderRadius: 9, textDecoration: 'none', fontSize: 14, fontWeight: 600,
+          fontFamily: "var(--platform-font-body, 'DM Sans', sans-serif)",
+          color: 'var(--platform-text-secondary, #4a4f5e)',
+        }}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"
+          strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+          <path d="M9.1 9a3 3 0 1 1 4.6 2.5c-.9.6-1.7 1.2-1.7 2.5M12 17h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+        </svg>
+        <span>Help</span>
+      </a>
     </header>
   );
 }

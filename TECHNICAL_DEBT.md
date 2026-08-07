@@ -221,30 +221,25 @@ as passed. **This is a validation-capability gap, not a current release blocker.
 safe fault-injection / preview capability would close it; related to the absence of a
 dev/sandbox Stream app noted above.
 
-## Stage 2 — destination-change focus management and aria-live announcements (deferred; scheduled for closure in Stage 3's global shell/navigation slice)
+## Stage 3 Slice 1b — Community / Stream internals are not yet theme-harmonized, and a temporary nested-navigation effect exists (documented boundary)
 
-`platformShell.jsx` explicitly deferred destination-change focus management and
-aria-live announcements during Stage 2 Slice 5 ("a later, separately scoped concern").
-This is accepted, intentional debt at the time it was written — the shell had exactly
-two destinations and no collapsible sidebar.
+**Theme.** The theme foundation (`src/theme.js` + `src/themeProvider.jsx`, `--platform-*` CSS
+custom properties) themes the outer presentation surfaces — the global shell (GlobalSidebar +
+ShellHeader), PlatformShell, the temporary HomeDestination, and the Community **outer canvas**.
+It deliberately does NOT re-theme the Community interior: the `stream-chat-react` message
+surfaces, the Community `Sidebar`, the consultation bar, and the Community-scoped
+`:root{--primary-*}` block inside `CommunityDestination` keep their existing (light) styling. In
+Dark mode the themed shell therefore frames a still-light Community card.
 
-Stage 3's global shell/navigation work is scoped to close this gap, not defer it to a
-separate later hardening pass. Remove this entry once that slice ships and tests cover
-destination-change focus management and aria-live behavior. Do not leave a stale
-resolved entry behind.
+**Nested navigation.** Slice 1b intentionally does NOT migrate Community's channel navigation into
+the global sidebar (that boundary is by design: the global sidebar answers "which area am I in?",
+Community's own sidebar answers "which channel am I in?"). While Community is the active area this
+produces a visible two-sidebar arrangement on desktop, and two independent drawers on mobile (the
+global-navigation drawer and Community's existing channel drawer, which have distinct triggers).
+This is the anticipated temporary effect, not a defect.
 
-## Stage 3 Slice 1a — Community / Stream internals are not yet dark-theme harmonized (documented boundary)
-
-The Slice 1a theme foundation (`src/theme.js` + `src/themeProvider.jsx`, `--anchor-*` CSS
-custom properties) themes the outer presentation surfaces — ShellHeader, the temporary
-HomeDestination, PlatformShell, and the Community **outer canvas**. It deliberately does
-NOT re-theme the Community interior: the `stream-chat-react` message surfaces, the
-Community `Sidebar`, the consultation bar, and the Community-scoped `:root{--primary-*}`
-block inside `CommunityDestination` keep their existing (light) styling. In Dark mode the
-themed canvas therefore frames a still-light Community card.
-
-This is an intentional Slice 1a boundary, not an oversight — full Community/Stream dark
-harmonization is a larger, behavior-sensitive change (third-party SDK CSS, contrast passes
-across every chat surface) reserved for a later slice. Close this entry when Community
-internals consume the semantic tokens and both themes are contrast-verified across the
-chat surfaces.
+Both are behavior-sensitive changes (third-party SDK CSS, contrast passes across every chat
+surface, and Community layout) reserved for the later **Community visual harmonization** slice.
+Close this entry when Community internals consume the semantic tokens, both themes are
+contrast-verified across the chat surfaces, and the area/channel navigation reads as one coherent
+system.
