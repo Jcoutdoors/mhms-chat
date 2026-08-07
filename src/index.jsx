@@ -1834,7 +1834,7 @@ function CommunityDestination({ runtime, currentUser, isMobile, mobileNavOpen, s
   const dismissWelcomeBack = welcomeBack.onDismiss;
   if (!chatClient || Object.keys(channelMap).length === 0) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#fff' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: 0, background: '#fff' }}>
         <style>{`@keyframes mhms-pulse{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}`}</style>
         <div>{[0,1,2].map(i => <span key={i} style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#3a55d9', margin: '0 3px', animation: 'mhms-pulse 1.2s infinite', animationDelay: `${i*0.2}s` }} />)}</div>
       </div>
@@ -1884,7 +1884,7 @@ function CommunityDestination({ runtime, currentUser, isMobile, mobileNavOpen, s
   };
 
   return (
-    <div style={{ display: 'flex', height: isMobile ? '100dvh' : '100vh', minHeight: isMobile ? '100dvh' : undefined, fontFamily: "'DM Sans', sans-serif", background: 'radial-gradient(1200px 600px at 80% -10%, #eef1f8 0%, rgba(238,241,248,0) 60%), #e7e9f1', padding: isMobile ? 0 : 14, overflow: 'hidden' }}>
+    <div style={{ display: 'flex', height: '100%', minHeight: 0, fontFamily: "'DM Sans', sans-serif", background: 'radial-gradient(1200px 600px at 80% -10%, #eef1f8 0%, rgba(238,241,248,0) 60%), #e7e9f1', padding: isMobile ? 0 : 14, overflow: 'hidden' }}>
       {showWelcome && <WelcomeCard name={currentUser?.name} onOpenGuide={() => dismissWelcome(true)} onDismiss={() => dismissWelcome(false)} />}
       {showWelcomeBack && welcomeBackRecap && (
         <WelcomeBackSummary
