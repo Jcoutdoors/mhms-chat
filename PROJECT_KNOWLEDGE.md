@@ -19,12 +19,17 @@ notes for the next session:
  `stage3-slice1a-theme-foundation` (PR open, not merged). New `src/theme.js` (pure
  semantic tokens + Light/Dark values + `resolveTheme` + `themeToCssVars`; DM Sans
  typography tokens per ADR-0004) and `src/themeProvider.jsx` (the single theme
- owner — resolves light/dark/system via `prefers-color-scheme`, applies `--anchor-*`
- CSS custom properties + `data-theme` to <html>, injects a `:focus-visible` ring;
- no persistence yet). App is wrapped in `<ThemeProvider orgAccent={brandColor}>` at the
- root; ShellHeader/HomeDestination/PlatformShell and the Community OUTER canvas consume
- tokens. Community/Stream internals are deliberately NOT dark-themed yet (documented
- boundary in TECHNICAL_DEBT.md). No IA/navigation change; no new backend storage.
+ owner — resolves light/dark/system via `prefers-color-scheme`, applies **product-name-
+ neutral `--platform-*`** CSS custom properties (never `--anchor-*`, so the durable token
+ layer doesn't depend on the provisional "Anchor" name) + `data-theme` to <html>, injects
+ a `:focus-visible` ring; no persistence and NO global window debug API — theme selection is
+ via the `initialPreference` prop or the narrow `?theme=` review seam only). App is wrapped
+ in `<ThemeProvider orgAccent={brandColor}>` at the root; ShellHeader/HomeDestination/
+ PlatformShell and the Community OUTER canvas consume tokens. `orgAccent` overrides ONLY the
+ base accent token (hover/soft/text + structural tokens stay platform-theme owned — coherent
+ org accent variants are deferred brand-system work; see the boundary note in theme.js).
+ Community/Stream internals are deliberately NOT dark-themed yet (documented boundary in
+ TECHNICAL_DEBT.md). No IA/navigation change; no new backend storage.
 - The Atlas AI agent is BUILT but ON HOLD and intentionally NOT in the repo. Jonathan wants to
  flesh out Atlas's scope before committing or wiring anything. Do not start Atlas work unless
  he raises it. See the Atlas section for why holding is deliberate (scope growth may require

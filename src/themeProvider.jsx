@@ -4,9 +4,9 @@ import { resolveTheme, normalizePreference, themeToCssVars, cssVarName } from '.
 // ThemeProvider (Stage 3 Slice 1a) — the SINGLE owner of theme preference/resolution/application.
 //
 // It resolves a preference (light | dark | system) against the OS `prefers-color-scheme` signal and
-// applies the resolved theme by writing Anchor CSS custom properties (`--anchor-*`) and a
+// applies the resolved theme by writing platform CSS custom properties (`--platform-*`) and a
 // `data-theme` attribute onto <html>. Downstream components consume the theme purely through those
-// CSS variables (e.g. `var(--anchor-surface)`), so there is NO duplicate React theme state to keep
+// CSS variables (e.g. `var(--platform-surface)`), so there is NO duplicate React theme state to keep
 // in sync — this is the one resolution seam future Settings→Appearance / org-default / user-override
 // flows will drive. It imports NO runtime, auth, or Stream module and owns no destination state.
 //
@@ -14,11 +14,11 @@ import { resolveTheme, normalizePreference, themeToCssVars, cssVarName } from '.
 // verification only) ?? 'system'. NO persistence/localStorage yet — not needed to validate the
 // architecture; adding it later is a one-line change at this same seam (documented in the plan).
 //
-// Accessibility: injects one global `:focus-visible` outline using `--anchor-focus-ring` so keyboard
+// Accessibility: injects one global `:focus-visible` outline using `--platform-focus-ring` so keyboard
 // focus is visible in BOTH themes. (Destination-change focus management and aria-live are explicitly
 // Slice 1b, and are NOT implemented here.)
 
-const FOCUS_STYLE_ID = 'anchor-theme-base';
+const FOCUS_STYLE_ID = 'platform-theme-base';
 
 function readInitialPreference(initialPreference) {
   if (initialPreference) return normalizePreference(initialPreference);
@@ -80,9 +80,8 @@ export function ThemeProvider({ children, initialPreference, orgAccent }) {
     };
   }, []);
 
-  // A minimal, non-visual verification seam (no product UI shipped this slice): lets local review
-  // set the preference at runtime. Downstream product surfaces do not depend on this.
-  if (typeof window !== 'undefined') window.__anchorSetThemePreference = setPreference;
-
+  // No global debug API is exposed. Local/QA theme selection is driven either by the
+  // `initialPreference` prop (the supported review/test seam) or the narrow `?theme=` query read in
+  // readInitialPreference (invalid values still fall back safely via normalizePreference/resolveTheme).
   return children;
 }

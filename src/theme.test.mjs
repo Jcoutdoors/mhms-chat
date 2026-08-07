@@ -94,19 +94,19 @@ test('8. typography tokens exist and default to DM Sans (no Inter / Plus Jakarta
 });
 
 // ---- css-var mapping + organization accent ----
-test('9. themeToCssVars emits --anchor-* custom properties for every color + typography token', () => {
+test('9. themeToCssVars emits --platform-* custom properties for every color + typography token', () => {
   const vars = themeToCssVars('light', {});
-  assert.equal(cssVarName('textPrimary'), '--anchor-text-primary');
+  assert.equal(cssVarName('textPrimary'), '--platform-text-primary');
   for (const key of THEME_TOKEN_KEYS) assert.ok(cssVarName(key) in vars, `${cssVarName(key)} present`);
   for (const key of TYPOGRAPHY_TOKEN_KEYS) assert.ok(cssVarName(key) in vars, `${cssVarName(key)} present`);
-  assert.equal(vars['--anchor-canvas'], LIGHT.canvas);
+  assert.equal(vars['--platform-canvas'], LIGHT.canvas);
 });
 
 test('10. an organization accent overrides ONLY the accent token, not the reusable theme logic', () => {
   const withOrg = themeToCssVars('light', { orgAccent: '#3b73d8' });
-  assert.equal(withOrg['--anchor-accent'], '#3b73d8', 'org brand color drives accent');
-  assert.equal(withOrg['--anchor-canvas'], LIGHT.canvas, 'non-accent tokens unchanged');
-  assert.equal(withOrg['--anchor-text-primary'], LIGHT.textPrimary, 'text tokens unchanged');
+  assert.equal(withOrg['--platform-accent'], '#3b73d8', 'org brand color drives accent');
+  assert.equal(withOrg['--platform-canvas'], LIGHT.canvas, 'non-accent tokens unchanged');
+  assert.equal(withOrg['--platform-text-primary'], LIGHT.textPrimary, 'text tokens unchanged');
   // theme.js itself hardcodes no MHMS/org color as the accent default
   const themeSrc = readFileSync(new URL('./theme.js', import.meta.url), 'utf8');
   assert.equal(themeSrc.includes('#3b73d8'), false, 'MHMS brandColor is not baked into theme.js');
@@ -153,11 +153,51 @@ test('14. theme wrapping does not alter destination ownership or runtime wiring'
   assert.ok(/const \[activeDestination, setActiveDestination\] = useState\(/.test(SHELL), 'PlatformShell still owns activeDestination');
 });
 
-test('15. theme is consumed through --anchor-* tokens in the themed surfaces (not new literal palettes)', () => {
+test('15. theme is consumed through --platform-* tokens in the themed surfaces (not new literal palettes)', () => {
   for (const [name, src] of [['ShellHeader', HEADER], ['HomeDestination', HOME], ['PlatformShell', SHELL]]) {
-    assert.ok(/var\(--anchor-/.test(src), `${name} consumes anchor tokens`);
+    assert.ok(/var\(--platform-/.test(src), `${name} consumes platform tokens`);
   }
   // typography flows through the body-font token in the shell + Home
-  assert.ok(HEADER.includes("var(--anchor-font-body"), 'ShellHeader uses the body font token');
-  assert.ok(HOME.includes("var(--anchor-font-display") && HOME.includes("var(--anchor-font-body"), 'Home uses font tokens');
+  assert.ok(HEADER.includes("var(--platform-font-body"), 'ShellHeader uses the body font token');
+  assert.ok(HOME.includes("var(--platform-font-display") && HOME.includes("var(--platform-font-body"), 'Home uses font tokens');
+});
+
+// ---- review corrections: neutral prefix + no global debug API ----
+test('16. the CSS custom-property prefix is product-name-neutral (--platform-*, never --anchor-*)', () => {
+  // No surface CONSUMES an --anchor-* variable (documentation mentions of the forbidden prefix are fine).
+  for (const [name, src] of [['ShellHeader', HEADER], ['HomeDestination', HOME], ['PlatformShell', SHELL], ['index.jsx', INDEX]]) {
+    assert.equal(/var\(--anchor-/.test(src), false, `${name} consumes no --anchor-* var`);
+  }
+  // The emitter produces ONLY --platform-* keys (both structural + org-accent-overridden).
+  for (const opts of [{}, { orgAccent: '#3b73d8' }]) {
+    for (const themeName of ['light', 'dark']) {
+      const keys = Object.keys(themeToCssVars(themeName, opts));
+      assert.ok(keys.every((k) => k.startsWith('--platform-')), `${themeName} emits only --platform-* keys`);
+      assert.equal(keys.some((k) => k.startsWith('--anchor-')), false, `${themeName} emits no --anchor-* key`);
+    }
+  }
+  assert.equal(cssVarName('canvas'), '--platform-canvas');
+  assert.equal(cssVarName('focusRing'), '--platform-focus-ring');
+  assert.equal(cssVarName('neuralNodePrimary'), '--platform-neural-node-primary');
+  assert.equal(cssVarName('fontBody'), '--platform-font-body');
+});
+
+test('17. ThemeProvider exposes no global window theme-setter debug API', () => {
+  assert.equal(/window\.__\w*SetThemePreference/.test(PROVIDER), false, 'no global window theme setter');
+  assert.equal(/window\.__anchor/.test(PROVIDER), false, 'no __anchor* global');
+  // theme selection remains via the supported seams only
+  assert.ok(/initialPreference/.test(PROVIDER), 'initialPreference prop seam retained');
+  assert.ok(/theme=\(light\|dark\|system\)/.test(PROVIDER), 'narrow ?theme= review seam retained with a fixed allow-list');
+});
+
+test('18. the organization-accent override is intentionally limited to the base accent token', () => {
+  // Only the base accent is overridden; hover/soft/text + all structural tokens stay theme-owned.
+  const withOrg = themeToCssVars('dark', { orgAccent: '#3b73d8' });
+  assert.equal(withOrg['--platform-accent'], '#3b73d8', 'base accent overridden');
+  assert.equal(withOrg['--platform-accent-hover'], DARK.accentHover, 'accentHover stays theme-owned');
+  assert.equal(withOrg['--platform-accent-soft'], DARK.accentSoft, 'accentSoft stays theme-owned');
+  assert.equal(withOrg['--platform-accent-text'], DARK.accentText, 'accentText stays theme-owned');
+  // the boundary is documented in source so nobody mistakes this for the final white-label color model
+  const THEME = readFileSync(new URL('./theme.js', import.meta.url), 'utf8');
+  assert.ok(/ORGANIZATION-ACCENT BOUNDARY/.test(THEME), 'org-accent boundary is documented in theme.js');
 });

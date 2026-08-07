@@ -25,15 +25,15 @@ export function ShellHeader({ config, activeDestination, onSelectDestination }) 
       style={{
         flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         gap: 16, height: 56, padding: '0 16px', boxSizing: 'border-box',
-        background: 'var(--anchor-header-background, #fff)',
-        borderBottom: '1px solid var(--anchor-header-border, #eef0f5)',
-        fontFamily: "var(--anchor-font-body, 'DM Sans', sans-serif)",
+        background: 'var(--platform-header-background, #fff)',
+        borderBottom: '1px solid var(--platform-header-border, #eef0f5)',
+        fontFamily: "var(--platform-font-body, 'DM Sans', sans-serif)",
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
         <span
           style={{
-            fontSize: 15, fontWeight: 700, color: 'var(--anchor-text-primary, #181b26)',
+            fontSize: 15, fontWeight: 700, color: 'var(--platform-text-primary, #181b26)',
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           }}
         >
@@ -52,10 +52,10 @@ export function ShellHeader({ config, activeDestination, onSelectDestination }) 
               style={{
                 cursor: 'pointer', border: 'none', borderRadius: 8,
                 minHeight: 44, padding: '9px 15px',
-                fontFamily: "var(--anchor-font-body, 'DM Sans', sans-serif)",
+                fontFamily: "var(--platform-font-body, 'DM Sans', sans-serif)",
                 fontSize: 14, fontWeight: isActive ? 700 : 600,
-                background: isActive ? `var(--anchor-accent, ${brandColor})` : 'transparent',
-                color: isActive ? 'var(--anchor-text-on-accent, #fff)' : 'var(--anchor-text-secondary, #4a4f5e)',
+                background: isActive ? `var(--platform-accent, ${brandColor})` : 'transparent',
+                color: isActive ? 'var(--platform-text-on-accent, #fff)' : 'var(--platform-text-secondary, #4a4f5e)',
               }}
             >
               {d.label}

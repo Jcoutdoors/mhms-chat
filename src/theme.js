@@ -1,4 +1,9 @@
-// Anchor — Neural Canvas theme foundation (Stage 3 Slice 1a).
+// Platform theme foundation — Neural Canvas (Stage 3 Slice 1a).
+//
+// NAMING: the low-level design-token infrastructure is intentionally product-name-NEUTRAL. CSS custom
+// properties are emitted with a `--platform-*` prefix (never `--anchor-*` / `--mhms-*` / `--collier-*`),
+// so this durable foundation does not become brand technical debt if the provisional commercial name
+// (currently "Anchor") changes or the platform is white-labeled.
 //
 // Pure, dependency-free token data + resolution logic. NO React, NO DOM, NO I/O here — this module
 // is safe to import from Node tests and from the browser provider alike (CommonJS, matching
@@ -107,15 +112,20 @@ function kebab(key) {
   return key.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
 }
 
-// The CSS custom-property name for a token key: 'textPrimary' -> '--anchor-text-primary'.
+// The CSS custom-property name for a token key: 'textPrimary' -> '--platform-text-primary'.
 function cssVarName(key) {
-  return '--anchor-' + kebab(key);
+  return '--platform-' + kebab(key);
 }
 
-// Build the full { '--anchor-*': value } map for a resolved theme, including typography tokens.
-// `orgAccent` (optional) layers an organization brand color onto the accent tokens WITHOUT the
-// theme module knowing anything organization-specific: accent + accentHover derive from it, and a
-// soft/text variant fall back to the theme defaults so contrast stays theme-appropriate.
+// Build the full { '--platform-*': value } map for a resolved theme, including typography tokens.
+//
+// ORGANIZATION-ACCENT BOUNDARY (Slice 1a — intentionally primitive; this is NOT the final white-label
+// color model). `orgAccent` (optional) overrides ONLY the base `accent` token with the organization's
+// brand color. All other tokens — including `accentHover`, `accentSoft`, `accentText`, and every Light/
+// Dark structural token — remain platform-theme owned. Coherent, contrast-safe organization-specific
+// hover/soft/text accent VARIANTS in both Light and Dark are deferred brand-system work; any future
+// derivation must preserve accessibility in both themes. Do not assume the single override here is the
+// finished organization color system.
 function themeToCssVars(themeName, options) {
   const opts = options || {};
   const base = THEMES[themeName] || LIGHT;
@@ -123,9 +133,7 @@ function themeToCssVars(themeName, options) {
   for (const key of THEME_TOKEN_KEYS) vars[cssVarName(key)] = base[key];
   for (const key of TYPOGRAPHY_TOKEN_KEYS) vars[cssVarName(key)] = TYPOGRAPHY[key];
   if (typeof opts.orgAccent === 'string' && opts.orgAccent) {
-    vars[cssVarName('accent')] = opts.orgAccent;
-    // Keep a sensible hover if only a single brand color is supplied: reuse theme default hover.
-    vars[cssVarName('accentHover')] = base.accentHover;
+    vars[cssVarName('accent')] = opts.orgAccent; // base accent only; variants stay theme-owned (see note above)
   }
   return vars;
 }
