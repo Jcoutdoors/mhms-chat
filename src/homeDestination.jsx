@@ -23,14 +23,15 @@ export function HomeDestination({ config, onGoToCommunity }) {
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
         height: '100%', minHeight: 0, width: '100%', boxSizing: 'border-box',
         padding: '32px 24px', textAlign: 'center',
-        fontFamily: "'DM Sans', sans-serif", color: '#181b26', background: '#fff',
+        fontFamily: "var(--anchor-font-body, 'DM Sans', sans-serif)",
+        color: 'var(--anchor-text-primary, #181b26)', background: 'var(--anchor-canvas, #fff)',
       }}
     >
       <div style={{ maxWidth: 520, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-        <h1 style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 28, fontWeight: 700, letterSpacing: '0.005em', margin: 0, color: '#181b26' }}>
+        <h1 style={{ fontFamily: "var(--anchor-font-display, 'DM Sans', sans-serif)", fontSize: 28, fontWeight: 700, letterSpacing: '0.005em', margin: 0, color: 'var(--anchor-text-primary, #181b26)' }}>
           {heading}
         </h1>
-        <p style={{ fontSize: 15, lineHeight: 1.6, color: '#686e7e', margin: 0 }}>
+        <p style={{ fontSize: 15, lineHeight: 1.6, color: 'var(--anchor-text-secondary, #686e7e)', margin: 0 }}>
           {supporting}
         </p>
         <button
@@ -38,9 +39,9 @@ export function HomeDestination({ config, onGoToCommunity }) {
           onClick={onGoToCommunity}
           style={{
             marginTop: 8, cursor: 'pointer', border: 'none',
-            background: 'linear-gradient(135deg,#3a55d9,#2f44b8)', color: '#fff',
-            fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 700,
-            padding: '12px 22px', borderRadius: 12, boxShadow: '0 4px 12px rgba(58,85,217,0.28)',
+            background: 'var(--anchor-accent, #3a55d9)', color: 'var(--anchor-text-on-accent, #fff)',
+            fontFamily: "var(--anchor-font-body, 'DM Sans', sans-serif)", fontSize: 14, fontWeight: 700,
+            padding: '12px 22px', borderRadius: 12, boxShadow: '0 4px 12px var(--anchor-neural-glow, rgba(58,85,217,0.28))',
           }}
         >
           {actionLabel}

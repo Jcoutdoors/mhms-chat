@@ -33,7 +33,7 @@ export function PlatformShell({ config, children, initialDestination = 'communit
   );
 
   return (
-    <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--anchor-canvas, #f4f6fb)', color: 'var(--anchor-text-primary, #181b26)' }}>
       <ShellHeader
         config={config}
         activeDestination={activeDestination}

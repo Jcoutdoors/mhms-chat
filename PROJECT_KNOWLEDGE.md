@@ -12,9 +12,19 @@ notes for the next session:
  now a recognized major platform capability (see PLATFORM_BLUEPRINT.md). Stage 3's
  first implementation slice is split into a theme/token foundation and a global
  shell + navigation accessibility slice (the latter including the Stage 2 focus/
- aria-live debt closure — see TECHNICAL_DEBT.md). Implementation has not yet started.
+ aria-live debt closure — see TECHNICAL_DEBT.md).
  See ARCHITECTURE_DECISIONS.md ADR-0002 through ADR-0004 for the assistant-placement,
  Home-IA, and typography decisions made ahead of implementation.
+- Stage 3 Slice 1a (theme foundation) is IMPLEMENTED on branch
+ `stage3-slice1a-theme-foundation` (PR open, not merged). New `src/theme.js` (pure
+ semantic tokens + Light/Dark values + `resolveTheme` + `themeToCssVars`; DM Sans
+ typography tokens per ADR-0004) and `src/themeProvider.jsx` (the single theme
+ owner — resolves light/dark/system via `prefers-color-scheme`, applies `--anchor-*`
+ CSS custom properties + `data-theme` to <html>, injects a `:focus-visible` ring;
+ no persistence yet). App is wrapped in `<ThemeProvider orgAccent={brandColor}>` at the
+ root; ShellHeader/HomeDestination/PlatformShell and the Community OUTER canvas consume
+ tokens. Community/Stream internals are deliberately NOT dark-themed yet (documented
+ boundary in TECHNICAL_DEBT.md). No IA/navigation change; no new backend storage.
 - The Atlas AI agent is BUILT but ON HOLD and intentionally NOT in the repo. Jonathan wants to
  flesh out Atlas's scope before committing or wiring anything. Do not start Atlas work unless
  he raises it. See the Atlas section for why holding is deliberate (scope growth may require
