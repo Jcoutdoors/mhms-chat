@@ -50,7 +50,9 @@ test('5. CommunityDestination owns no auth/controller lifecycle', () => {
   assert.equal(cd.includes('createAuthController'), false, 'no controller creation in CommunityDestination');
   assert.equal(cd.includes('controller.'), false, 'no controller.* calls in CommunityDestination');
   assert.equal(cd.includes('controller.boot'), false, 'no boot in CommunityDestination');
-  // profile-edit and logout reach the controller via semantic props (Slice-5 will host them in the shell).
+  // profile-edit and logout reach the controller via semantic props and remain in the Community sidebar
+  // (Slice 5 deliberately does NOT relocate them into the shell — shell account controls are a separate,
+  // later-scoped decision).
   assert.ok(cd.includes('onEditProfile={onEditProfile}') && cd.includes('onLogout={onLogout}'), 'account actions via semantic props');
 });
 
@@ -77,11 +79,13 @@ test('8. verified-auth phase gating remains in App', () => {
   assert.ok(app.includes("phase !== 'community'"), 'community phase gate in App');
 });
 
-test('9. no Stage 2 shell/Home/destination implementation exists yet', () => {
-  assert.equal(/function\s+PlatformShell\s*\(/.test(INDEX), false, 'no PlatformShell yet');
-  assert.equal(/function\s+ShellHeader\s*\(/.test(INDEX), false, 'no ShellHeader yet');
-  assert.equal(/function\s+HomeDestination\s*\(/.test(INDEX), false, 'no HomeDestination yet');
-  assert.equal(/activeDestination/.test(INDEX), false, 'no activeDestination state yet');
+test('9. shell/Home/destination code stays out of index.jsx (isolated modules)', () => {
+  // PlatformShell, ShellHeader, and HomeDestination all live in their own modules; index.jsx (App +
+  // CommunityDestination) defines none of them and holds no destination state — that lives in PlatformShell.
+  assert.equal(/function\s+PlatformShell\s*\(/.test(INDEX), false, 'PlatformShell not defined in index.jsx');
+  assert.equal(/function\s+ShellHeader\s*\(/.test(INDEX), false, 'ShellHeader not defined in index.jsx');
+  assert.equal(/function\s+HomeDestination\s*\(/.test(INDEX), false, 'HomeDestination not defined in index.jsx');
+  assert.equal(/activeDestination/.test(INDEX), false, 'no activeDestination state in index.jsx');
 });
 
 test('10. runtime contract is unchanged (exports + listener ownership)', () => {
@@ -97,4 +101,23 @@ test('11. the committed root chat.bundle.js remains the approved Stage 1 artifac
   const hash = createHash('sha256').update(readFileSync(ROOT_BUNDLE)).digest('hex');
   assert.equal(hash, 'f1b3ee488cea66c82bab0b512226adff1553bc199c26a3a6c60d2091cf5d57bf',
     'Slice 1 must not republish the production bundle');
+});
+
+// ---- Stage 2 Slice 5: Community fits the shell content region beneath the persistent header ----
+test('12. CommunityDestination fills the shell content region (no second viewport height)', () => {
+  const cd = fnBody(INDEX, 'CommunityDestination');
+  assert.equal(/100vh/.test(cd), false, 'no 100vh inside CommunityDestination');
+  assert.equal(/100dvh/.test(cd), false, 'no 100dvh inside CommunityDestination — PlatformShell owns viewport height');
+  assert.ok(/height: '100%'/.test(cd), 'Community fills its container with height:100%');
+  assert.ok(/display: 'flex'/.test(cd), 'desktop layout remains flex-based');
+  assert.equal(/calc\(/.test(cd), false, 'no magic header-height subtraction');
+});
+
+test('13. the Community mobile drawer and isMobile wiring are preserved', () => {
+  // The mobile nav drawer (a fixed 100dvh overlay in the Sidebar) is unchanged by the shell integration.
+  assert.ok(/position: 'fixed', top: 0, left: 0, height: '100dvh'/.test(INDEX), 'mobile drawer overlay intact');
+  const app = fnBody(INDEX, 'App');
+  assert.ok(/isMobile=\{isMobile\}/.test(app), 'App still passes isMobile to CommunityDestination');
+  const cd = fnBody(INDEX, 'CommunityDestination');
+  assert.ok(cd.includes('mobileNavOpen') && cd.includes('setMobileNavOpen'), 'Community still owns mobile drawer state');
 });

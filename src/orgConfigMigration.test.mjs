@@ -109,8 +109,12 @@ test('14. HomeDestination exists as a dedicated module (Slice 4)', () => {
   assert.ok(/export function HomeDestination\(/.test(HOME), 'HomeDestination is its own module');
 });
 
-test('15. no ShellHeader exists yet', () => {
-  assert.equal(/function\s+ShellHeader\s*\(/.test(INDEX + SHELL), false);
+test('15. ShellHeader is a dedicated presentation module, not defined in App/orchestration', () => {
+  // Slice 5 adds the shell header, but it stays out of index.jsx (App) — it lives in its own module and
+  // is only composed by PlatformShell, so orchestration/config code carries no shell chrome.
+  assert.equal(/function\s+ShellHeader\s*\(/.test(INDEX), false, 'ShellHeader not defined in index.jsx');
+  const HEADER = readFileSync(new URL('./shellHeader.jsx', import.meta.url), 'utf8');
+  assert.ok(/export function ShellHeader\(/.test(HEADER), 'ShellHeader is its own exported module');
 });
 
 test('16. destination state is owned by PlatformShell, not App (index.jsx)', () => {
@@ -119,9 +123,15 @@ test('16. destination state is owned by PlatformShell, not App (index.jsx)', () 
   assert.ok(/activeDestination/.test(SHELL), 'PlatformShell owns activeDestination');
 });
 
-test('17. no visible destination navigation exists', () => {
-  // No destination switch handler / nav control was wired into the app.
-  assert.equal(/onNavigate|onSelectDestination|data-destination/.test(INDEX + SHELL), false);
+test('17. destination navigation is organization-config-driven (single source), not hardcoded', () => {
+  // Slice 5 adds visible navigation; its labels must come from MHMS_ORG_CONFIG.destinations — the same
+  // single organization source this migration established — with no second navigation configuration.
+  const HEADER = readFileSync(new URL('./shellHeader.jsx', import.meta.url), 'utf8');
+  assert.ok(/config\.destinations/.test(HEADER), 'ShellHeader reads config.destinations');
+  assert.deepEqual(MHMS_ORG_CONFIG.destinations.map((d) => d.id), ['home', 'community'], 'unchanged destination ids');
+  for (const banned of ['routes', 'navItems', 'navigation', 'menu']) {
+    assert.equal(JSON.stringify(MHMS_ORG_CONFIG).includes(banned), false, `no second navigation config field: ${banned}`);
+  }
 });
 
 test('18. the runtime contract is unchanged', () => {
