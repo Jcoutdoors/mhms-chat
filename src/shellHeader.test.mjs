@@ -130,3 +130,12 @@ test('19. config.destinations supplies exactly the Home and Community labels (be
   assert.deepEqual(MHMS_ORG_CONFIG.destinations.map((d) => d.id), ['home', 'community']);
   assert.deepEqual(labels, ['Home', 'Community']);
 });
+
+test('20. destination controls meet the >=44px mobile touch-target minimum', () => {
+  // Global box-sizing:border-box means minHeight is the rendered control height. The active/inactive
+  // branch shares this style, so both destination buttons get the same minimum.
+  const body = fnBody(HEADER, 'ShellHeader');
+  const m = body.match(/minHeight:\s*(\d+)/);
+  assert.ok(m, 'destination button declares a minHeight');
+  assert.ok(Number(m[1]) >= 44, `destination button minHeight >= 44 (found ${m && m[1]})`);
+});

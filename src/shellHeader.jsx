@@ -50,7 +50,7 @@ export function ShellHeader({ config, activeDestination, onSelectDestination }) 
               onClick={() => onSelectDestination(d.id)}
               style={{
                 cursor: 'pointer', border: 'none', borderRadius: 8,
-                padding: '9px 15px', fontFamily: "'DM Sans', sans-serif",
+                minHeight: 44, padding: '9px 15px', fontFamily: "'DM Sans', sans-serif",
                 fontSize: 14, fontWeight: isActive ? 700 : 600,
                 background: isActive ? brandColor : 'transparent',
                 color: isActive ? '#fff' : '#4a4f5e',
