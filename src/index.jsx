@@ -2501,7 +2501,7 @@ function App() {
   // phase === 'community': chat shell. Wait for the connected client + channels.
 
   return (
-    <PlatformShell>
+    <PlatformShell config={orgConfig}>
     <CommunityDestination
       runtime={runtime}
       currentUser={currentUser}

@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { MHMS_ORG_CONFIG, assistantEnabled, assistantAvatarSources, resolveCopy } from './orgConfig.js';
+import { MHMS_ORG_CONFIG, assistantEnabled, assistantAvatarSources, resolveCopy, resolveOrgText } from './orgConfig.js';
 
 const disabled = { ...MHMS_ORG_CONFIG, assistant: { ...MHMS_ORG_CONFIG.assistant, enabled: false } };
 
@@ -65,6 +65,40 @@ test('resolveCopy fills {assistant} and {org} when the assistant is enabled', ()
   assert.ok(s.includes('CATS Program'), 'org name present');
   assert.equal(s.includes('{assistant}'), false);
   assert.equal(s.includes('{org}'), false);
+});
+
+// ---- shared organization-token helper (resolveCopy and resolveOrgText share one implementation) ----
+test('resolveCopy and resolveOrgText fill {community} identically (single token implementation)', () => {
+  // entryHeadline carries {community} and no assistant token, so both paths must agree.
+  const raw = MHMS_ORG_CONFIG.copy.entryHeadline; // 'Welcome to the {community}'
+  assert.ok(raw.includes('{community}'), 'source string still uses the {community} token');
+  assert.equal(resolveCopy(MHMS_ORG_CONFIG, 'entryHeadline'), 'Welcome to the CATS Community');
+  assert.equal(resolveOrgText(MHMS_ORG_CONFIG, raw), resolveCopy(MHMS_ORG_CONFIG, 'entryHeadline'));
+});
+
+test('resolveCopy and resolveOrgText fill {org} identically (single token implementation)', () => {
+  // reconnectedSuccess carries {org} and no assistant token, so both paths must agree.
+  const raw = MHMS_ORG_CONFIG.copy.reconnectedSuccess;
+  assert.ok(raw.includes('{org}'), 'source string still uses the {org} token');
+  assert.equal(resolveOrgText(MHMS_ORG_CONFIG, raw), resolveCopy(MHMS_ORG_CONFIG, 'reconnectedSuccess'));
+  assert.ok(resolveOrgText(MHMS_ORG_CONFIG, raw).includes('CATS Program'), '{org} resolved to orgName');
+});
+
+test('org-token filling shares the same fallbacks across both paths', () => {
+  // Missing orgName/communityLabel -> "the community" (community falls back to org) in BOTH paths.
+  const bare = { assistant: { enabled: false }, copy: { entryHeadline: 'Welcome to the {community}' } };
+  assert.equal(resolveOrgText(bare, 'Welcome to the {community}'), 'Welcome to the the community');
+  assert.equal(resolveCopy(bare, 'entryHeadline'), resolveOrgText(bare, 'Welcome to the {community}'));
+  const org = { assistant: { enabled: false }, orgName: 'Acme', copy: { entryHeadline: 'Welcome to the {community}' } };
+  assert.equal(resolveOrgText(org, 'Welcome to the {community}'), 'Welcome to the Acme');
+  assert.equal(resolveCopy(org, 'entryHeadline'), resolveOrgText(org, 'Welcome to the {community}'));
+});
+
+test('resolveOrgText returns "" for non-string input (safe optional config)', () => {
+  assert.equal(resolveOrgText(MHMS_ORG_CONFIG, undefined), '');
+  assert.equal(resolveOrgText(MHMS_ORG_CONFIG, null), '');
+  assert.equal(resolveOrgText(MHMS_ORG_CONFIG, 42), '');
+  assert.equal(resolveOrgText(null, undefined), '');
 });
 
 // ---- assistant-disabled neutral fallback ----

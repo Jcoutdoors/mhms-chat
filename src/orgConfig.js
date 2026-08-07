@@ -127,13 +127,22 @@ function assistantAvatarSources(config) {
   return out;
 }
 
+// The SINGLE implementation of organization-token filling: replaces {org} and {community}
+// in a string. Both resolveCopy (for `copy` keys) and resolveOrgText (for arbitrary org
+// strings like home.heading) delegate here so token semantics can never diverge. Assistant-
+// token handling stays in resolveCopy. Non-strings resolve to '' (safe for optional config).
+function fillOrgTokens(config, text) {
+  if (typeof text !== 'string') return '';
+  const org = (config && config.orgName) || 'the community';
+  const community = (config && config.communityLabel) || org;
+  return text.replace(/\{org\}/g, org).replace(/\{community\}/g, community);
+}
+
 // Fills {assistant}, {org}, and {community} placeholders. When the assistant is disabled,
 // a `copyNeutral[key]` override wins if present; otherwise the assistant intro clause and
 // any {assistant} token are stripped so no persona name leaks through.
 function resolveCopy(config, key) {
-  const org = (config && config.orgName) || 'the community';
-  const community = (config && config.communityLabel) || org;
-  const fill = (s) => s.replace(/\{org\}/g, org).replace(/\{community\}/g, community);
+  const fill = (s) => fillOrgTokens(config, s);
 
   if (!assistantEnabled(config)) {
     if (config && config.copyNeutral && typeof config.copyNeutral[key] === 'string') {
@@ -149,4 +158,12 @@ function resolveCopy(config, key) {
   return fill(base).replace(/\{assistant\}/g, assistant);
 }
 
-module.exports = { MHMS_ORG_CONFIG, assistantEnabled, assistantAvatarSources, resolveCopy };
+// Fills {org}/{community} tokens in an arbitrary configured string, for organization strings
+// that live OUTSIDE the `copy` map (e.g. home.heading). Delegates to the shared fillOrgTokens
+// so it applies the exact same substitution as resolveCopy — callers never duplicate token-
+// replacement logic. No assistant-token handling; non-strings resolve to '' (via fillOrgTokens).
+function resolveOrgText(config, text) {
+  return fillOrgTokens(config, text);
+}
+
+module.exports = { MHMS_ORG_CONFIG, assistantEnabled, assistantAvatarSources, resolveCopy, resolveOrgText };
