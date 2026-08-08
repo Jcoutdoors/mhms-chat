@@ -15,8 +15,7 @@ notes for the next session:
  aria-live debt closure — see TECHNICAL_DEBT.md).
  See ARCHITECTURE_DECISIONS.md ADR-0002 through ADR-0004 for the assistant-placement,
  Home-IA, and typography decisions made ahead of implementation.
-- Stage 3 Slice 1a (theme foundation) is IMPLEMENTED on branch
- `stage3-slice1a-theme-foundation` (PR open, not merged). New `src/theme.js` (pure
+- Stage 3 Slice 1a (theme foundation) is MERGED (main `8fcb269`, PR #35). New `src/theme.js` (pure
  semantic tokens + Light/Dark values + `resolveTheme` + `themeToCssVars`; DM Sans
  typography tokens per ADR-0004) and `src/themeProvider.jsx` (the single theme
  owner — resolves light/dark/system via `prefers-color-scheme`, applies **product-name-
@@ -30,6 +29,27 @@ notes for the next session:
  org accent variants are deferred brand-system work; see the boundary note in theme.js).
  Community/Stream internals are deliberately NOT dark-themed yet (documented boundary in
  TECHNICAL_DEBT.md). No IA/navigation change; no new backend storage.
+- Stage 3 Slice 1b (global shell + navigation accessibility) is IMPLEMENTED on branch
+ `stage3-slice1b-global-shell` (PR open, not merged). Replaces the temporary Stage-2 header
+ nav with the durable global shell: new `src/globalSidebar.jsx` (PRIMARY destination nav —
+ config-driven from `config.destinations` {id,label,enabled?,icon?}, collapsible desktop rail /
+ mobile drawer, org identity + Help & Support utility, aria-current, accessible names in
+ collapsed mode). `shellHeader.jsx` repurposed to the top UTILITY header (sidebar toggle +
+ current-area context + Help; NO destination nav). `platformShell.jsx` restructured as the single
+ owner of shell state (activeDestination + desktop `collapsed` + mobile `globalNavOpen` + its own
+ `isMobile`), and it **closes the Stage-2 destination focus/aria-live debt**: on destination change
+ it moves focus to the `<main>` landmark (post-mount only) and announces the area via a polite
+ aria-live region; the mobile drawer is a modal dialog with Escape close, focus-in on open, and
+ focus-return to the toggle. Community runtime/auth untouched (App wiring `<PlatformShell
+ config={orgConfig}>` unchanged). **Slice 1b correction (shell integration):** removed the legacy
+ rounded "app-inside-an-app" card + inset margin + duplicated org-identity block from Community;
+ the Community contextual rail is now a token-based secondary surface (`--platform-canvas-subtle`
+ + divider, labelled `<nav aria-label="Community channels">`, compact "COMMUNITY" label instead of
+ repeated identity); the consult bar is a restrained accent-soft treatment; the global vs Community
+ nav controls have distinct accessible names ("Open global navigation" vs "Open Community channels").
+ Community keeps its own channel navigation (by design). Consumes `--platform-*` tokens (Light/Dark).
+ Deferred: full Community/Stream INTERNAL visual harmonization (chat surfaces + rail item contrast in
+ dark) — see TECHNICAL_DEBT.md. No Workspace/Notes/Tasks/Learning/Calendar/Search/assistant/settings/persistence.
 - The Atlas AI agent is BUILT but ON HOLD and intentionally NOT in the repo. Jonathan wants to
  flesh out Atlas's scope before committing or wiring anything. Do not start Atlas work unless
  he raises it. See the Atlas section for why holding is deliberate (scope growth may require

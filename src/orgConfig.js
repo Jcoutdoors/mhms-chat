@@ -86,13 +86,16 @@ const MHMS_ORG_CONFIG = {
     emailBody: "Use the email connected to your {org} registration. We'll send you a six-digit code.",
     codeBody: 'Enter the six-digit code we sent you.',
   },
-  // Platform Navigation & Home Foundation — Stage 2. Organization-level shell/Home data,
-  // kept in this seam so reusable shell components never hardcode org-specific values.
-  // `destinations` and `home` are consumed starting in a later slice (Home is not built
-  // yet); `home` copy uses the same {org}/{community} tokens resolveCopy already fills.
+  // Platform Navigation & Home Foundation — Stage 2/3. Organization-level shell data, kept in this
+  // seam so reusable shell components never hardcode org-specific values. Each destination is
+  // { id, label, enabled?, icon? }: `enabled` defaults to true (a false/omitted-enabled entry is
+  // hidden from the global sidebar without breaking navigation); `icon` names a glyph from the shell's
+  // small built-in icon set (unknown/absent icons fall back to a neutral mark). Home and Community are
+  // the only production destinations today; future capabilities (Workspace, Learning, Calendar, …) are
+  // added here through configuration, not by hardcoding in shell code.
   destinations: [
-    { id: 'home', label: 'Home' },
-    { id: 'community', label: 'Community' },
+    { id: 'home', label: 'Home', enabled: true, icon: 'home' },
+    { id: 'community', label: 'Community', enabled: true, icon: 'community' },
   ],
   home: {
     heading: 'Welcome to the {community}',

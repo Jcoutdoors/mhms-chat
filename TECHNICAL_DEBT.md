@@ -221,30 +221,23 @@ as passed. **This is a validation-capability gap, not a current release blocker.
 safe fault-injection / preview capability would close it; related to the absence of a
 dev/sandbox Stream app noted above.
 
-## Stage 2 — destination-change focus management and aria-live announcements (deferred; scheduled for closure in Stage 3's global shell/navigation slice)
+## Stage 3 Slice 1b — Community/Stream INTERNAL visual harmonization is deferred (structural integration is done)
 
-`platformShell.jsx` explicitly deferred destination-change focus management and
-aria-live announcements during Stage 2 Slice 5 ("a later, separately scoped concern").
-This is accepted, intentional debt at the time it was written — the shell had exactly
-two destinations and no collapsible sidebar.
+**Structural integration is complete (Slice 1b correction).** Community is now integrated into the
+global shell: the legacy rounded inset "app inside an app" card, its inset margin, and the
+duplicated organization-identity block were removed; the Community contextual rail is a secondary
+navigation surface consuming `--platform-*` tokens (with a subtle divider); the consultation bar is
+a restrained token-based treatment; and the two navigation layers are distinct with unambiguous
+accessible names ("Open global navigation" vs "Open Community channels"). The global sidebar
+answers "which area am I in?"; Community's own rail answers "which channel am I in?" — by design,
+and Community's channel navigation is NOT migrated into the global sidebar.
 
-Stage 3's global shell/navigation work is scoped to close this gap, not defer it to a
-separate later hardening pass. Remove this entry once that slice ships and tests cover
-destination-change focus management and aria-live behavior. Do not leave a stale
-resolved entry behind.
-
-## Stage 3 Slice 1a — Community / Stream internals are not yet dark-theme harmonized (documented boundary)
-
-The Slice 1a theme foundation (`src/theme.js` + `src/themeProvider.jsx`, `--anchor-*` CSS
-custom properties) themes the outer presentation surfaces — ShellHeader, the temporary
-HomeDestination, PlatformShell, and the Community **outer canvas**. It deliberately does
-NOT re-theme the Community interior: the `stream-chat-react` message surfaces, the
-Community `Sidebar`, the consultation bar, and the Community-scoped `:root{--primary-*}`
-block inside `CommunityDestination` keep their existing (light) styling. In Dark mode the
-themed canvas therefore frames a still-light Community card.
-
-This is an intentional Slice 1a boundary, not an oversight — full Community/Stream dark
-harmonization is a larger, behavior-sensitive change (third-party SDK CSS, contrast passes
-across every chat surface) reserved for a later slice. Close this entry when Community
-internals consume the semantic tokens and both themes are contrast-verified across the
-chat surfaces.
+**What remains deferred (later Community visual harmonization slice).** The Community INTERIOR is
+not yet fully theme-harmonized: the `stream-chat-react` message surfaces, the Community
+`Sidebar`'s per-item styling (channel-item and member-list colors — e.g. member names read low-
+contrast on the dark rail), and the Community-scoped `:root{--primary-*}` block keep literal
+(light-oriented) values, so in Dark mode the shell frames a still-light chat content area and some
+rail internals need contrast passes. Consultation remains a link-based bar (no Calendar-backed
+events yet). These are behavior-sensitive changes (third-party SDK CSS, per-surface contrast, and
+Community layout). Close this entry when Community internals consume the semantic tokens and both
+themes are contrast-verified across every chat/rail surface.
