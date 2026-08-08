@@ -49,9 +49,11 @@ test('4. the sidebar toggle is accessible (label + aria-expanded + aria-controls
   assert.ok(/ref=\{toggleRef\}/.test(body), 'toggle accepts a ref so focus can return to it');
 });
 
-test('5. the toggle label reflects mobile (open/close) vs desktop (expand/collapse)', () => {
-  assert.ok(/isMobile[\s\S]*Close navigation[\s\S]*Open navigation/.test(HEADER), 'mobile open/close labels');
+test('5. the toggle label reflects mobile (open/close) vs desktop (expand/collapse), and names the GLOBAL nav', () => {
+  assert.ok(/isMobile[\s\S]*Close global navigation[\s\S]*Open global navigation/.test(HEADER), 'mobile open/close global-navigation labels');
   assert.ok(/Collapse navigation[\s\S]*Expand navigation/.test(HEADER), 'desktop collapse/expand labels');
+  // distinct from Community's own channel control ("Open Community channels"), so the two are unambiguous
+  assert.equal(HEADER.includes('Open Community channels'), false, 'the global toggle does not claim the Community channel control');
 });
 
 test('6. the header shows a compact current-area context (not clickable nav)', () => {

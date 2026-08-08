@@ -800,7 +800,10 @@ function Sidebar({ groups, activeId, onSelect, currentUser, chatClient, activeCh
   const name = currentUser?.name || '';
   const color = currentUser?.color || '#3b73d8';
 
-  const baseStyle = { width: 264, minWidth: 264, background: 'linear-gradient(180deg,#f8f9fc 0%, #f4f6fa 100%)', borderRight: '1px solid #eef0f5', display: 'flex', flexDirection: 'column', fontFamily: "'DM Sans', sans-serif", overflowY: 'auto', WebkitOverflowScrolling: 'touch' };
+  // Slice 1b correction: the Community contextual rail is a secondary navigation SURFACE inside the shell
+  // (not a separate application sidebar). It uses --platform-* tokens and a subtle right divider so it reads
+  // as one system with the global shell; full Stream/Community harmonization is a later slice.
+  const baseStyle = { width: 264, minWidth: 264, background: 'var(--platform-canvas-subtle, #f4f6fa)', borderRight: '1px solid var(--platform-border-subtle, #eef0f5)', display: 'flex', flexDirection: 'column', fontFamily: "var(--platform-font-body, 'DM Sans', sans-serif)", overflowY: 'auto', WebkitOverflowScrolling: 'touch' };
   const mobileStyle = isMobile ? {
     position: 'fixed', top: 0, left: 0, height: '100dvh', maxHeight: '100dvh', zIndex: 1100,
     transform: mobileNavOpen ? 'translateX(0)' : 'translateX(-100%)',
@@ -817,16 +820,13 @@ function Sidebar({ groups, activeId, onSelect, currentUser, chatClient, activeCh
         {isMobile && (
           <button onClick={onCloseMobileNav} style={{ position: 'absolute', top: 14, right: 12, background: 'none', border: 'none', fontSize: 22, color: '#999', cursor: 'pointer', lineHeight: 1, zIndex: 2 }}>×</button>
         )}
-      <div style={{ padding: '20px 20px 16px', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 30, height: 30, borderRadius: 9, background: 'linear-gradient(135deg,#3a55d9,#2f44b8)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 14, boxShadow: '0 4px 12px rgba(58,85,217,0.35)', fontFamily: "'Fraunces', serif", flexShrink: 0 }}>C</div>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#181b26', letterSpacing: '0.01em' }}>{APP_CONFIG.orgName}</div>
-            <div style={{ fontSize: 11.5, color: '#969cac', marginTop: 1 }}>{APP_CONFIG.orgSubtitle}</div>
-          </div>
-        </div>
+      {/* Slice 1b correction: the organization identity now lives in the global shell — the Community rail
+          no longer repeats it. A small contextual area label is enough here. */}
+      <div style={{ padding: '16px 18px 6px', flexShrink: 0 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--platform-text-muted, #969cac)' }}>Community</div>
       </div>
 
+      <nav aria-label="Community channels">
       {groups.map(group => (
         <div key={group.label} style={{ padding: '12px 10px 4px', flexShrink: 0 }}>
           <div style={{ fontSize: 10.5, fontWeight: 700, color: '#969cac', letterSpacing: '0.09em', textTransform: 'uppercase', padding: '8px 10px 6px' }}>{group.label}</div>
@@ -849,6 +849,7 @@ function Sidebar({ groups, activeId, onSelect, currentUser, chatClient, activeCh
           })}
         </div>
       ))}
+      </nav>
 
       <MembersList chatClient={chatClient} activeChannel={activeChannel} currentUserId={currentUser?.id} />
 
@@ -1885,7 +1886,7 @@ function CommunityDestination({ runtime, currentUser, isMobile, mobileNavOpen, s
   };
 
   return (
-    <div style={{ display: 'flex', height: '100%', minHeight: 0, fontFamily: "var(--platform-font-body, 'DM Sans', sans-serif)", background: 'var(--platform-canvas, #e7e9f1)', padding: isMobile ? 0 : 14, overflow: 'hidden' }}>
+    <div style={{ display: 'flex', height: '100%', minHeight: 0, fontFamily: "var(--platform-font-body, 'DM Sans', sans-serif)", background: 'var(--platform-canvas, #e7e9f1)', overflow: 'hidden' }}>
       {showWelcome && <WelcomeCard name={currentUser?.name} onOpenGuide={() => dismissWelcome(true)} onDismiss={() => dismissWelcome(false)} />}
       {showWelcomeBack && welcomeBackRecap && (
         <WelcomeBackSummary
@@ -1908,7 +1909,9 @@ function CommunityDestination({ runtime, currentUser, isMobile, mobileNavOpen, s
           This update is no longer available.
         </div>
       )}
-      <div style={{ display: 'flex', flex: 1, background: '#fff', borderRadius: isMobile ? 0 : 18, boxShadow: isMobile ? 'none' : '0 24px 60px rgba(24,27,38,0.14)', overflow: 'hidden', border: isMobile ? 'none' : '1px solid rgba(255,255,255,0.6)', minHeight: 0 }}>
+      {/* Slice 1b correction: Community fills the destination directly — no legacy rounded inset "app card"
+          (the global shell is the visual frame). The contextual rail + content define their own surfaces. */}
+      <div style={{ display: 'flex', flex: 1, background: 'var(--platform-surface, #fff)', overflow: 'hidden', minHeight: 0 }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap');
         :root{
@@ -1955,16 +1958,17 @@ function CommunityDestination({ runtime, currentUser, isMobile, mobileNavOpen, s
       `}</style>
       <Sidebar groups={APP_CONFIG.channelGroups} activeId={activeId} onSelect={handleChannelSelect} currentUser={currentUser} chatClient={chatClient} activeChannel={activeChannel} onEditProfile={onEditProfile} onLogout={onLogout} unreadCounts={unreadCounts} mentionCounts={mentionCounts} isMobile={isMobile} mobileNavOpen={mobileNavOpen} onCloseMobileNav={() => setMobileNavOpen(false)} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', minHeight: 0, minWidth: 0 }}>
-        {/* Persistent live-consult bar, visible across all channels */}
+        {/* Persistent live-consult bar — Slice 1b correction: restrained, token-based contextual treatment
+            (was a bright full-width legacy gradient strip). Link/copy/behavior unchanged; data from config. */}
         <a href={MHMS_ORG_CONFIG.consult.link} target="_blank" rel="noopener noreferrer"
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, flexShrink: 0, background: 'linear-gradient(135deg, #3a55d9 0%, #2f44b8 100%)', color: '#fff', textDecoration: 'none', fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600, padding: '9px 16px', letterSpacing: '0.01em' }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+          style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, background: 'var(--platform-accent-soft, #e6ebfb)', color: 'var(--platform-accent-text, #2f44b8)', textDecoration: 'none', fontFamily: "var(--platform-font-body, 'DM Sans', sans-serif)", fontSize: 13, fontWeight: 600, padding: '8px 16px', borderBottom: '1px solid var(--platform-border-subtle, #eef0f5)' }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{isMobile ? 'Live consults · every other week · 6pm MST' : 'Live consultations with Dr. Mayfield, every other week at 6pm MST (7pm CST / 8pm EST / 5pm PST). Full schedule in Getting Started.'}</span>
-          <span style={{ background: 'rgba(255,255,255,0.2)', borderRadius: 6, padding: '2px 9px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 }}>Join link</span>
+          <span style={{ marginLeft: 'auto', background: 'var(--platform-accent, #3a55d9)', color: 'var(--platform-text-on-accent, #fff)', borderRadius: 8, padding: '3px 11px', fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 }}>Join Zoom</span>
         </a>
         {isMobile && !mobileNavOpen && (
-          <button onClick={() => setMobileNavOpen(true)} title="Open menu"
-            style={{ position: 'absolute', top: 50, left: 12, zIndex: 70, background: '#fff', border: '1px solid #e8e8e8', borderRadius: 8, width: 38, height: 38, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, cursor: 'pointer', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+          <button onClick={() => setMobileNavOpen(true)} title="Open Community channels" aria-label="Open Community channels"
+            style={{ position: 'absolute', top: 50, left: 12, zIndex: 70, background: 'var(--platform-surface, #fff)', border: '1px solid var(--platform-border-subtle, #e8e8e8)', borderRadius: 8, width: 38, height: 38, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, cursor: 'pointer', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
             <span style={{ width: 16, height: 2, background: '#444', borderRadius: 2 }} />
             <span style={{ width: 16, height: 2, background: '#444', borderRadius: 2 }} />
             <span style={{ width: 16, height: 2, background: '#444', borderRadius: 2 }} />

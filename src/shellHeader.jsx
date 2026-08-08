@@ -24,7 +24,7 @@ export function ShellHeader({ config, activeLabel, navExpanded, navControlsId, i
   const orgName = (config && config.orgName) || '';
   const supportContact = (config && config.supportContact) || '';
   const toggleLabel = isMobile
-    ? (navExpanded ? 'Close navigation' : 'Open navigation')
+    ? (navExpanded ? 'Close global navigation' : 'Open global navigation')
     : (navExpanded ? 'Collapse navigation' : 'Expand navigation');
 
   return (

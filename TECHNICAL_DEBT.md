@@ -221,25 +221,23 @@ as passed. **This is a validation-capability gap, not a current release blocker.
 safe fault-injection / preview capability would close it; related to the absence of a
 dev/sandbox Stream app noted above.
 
-## Stage 3 Slice 1b — Community / Stream internals are not yet theme-harmonized, and a temporary nested-navigation effect exists (documented boundary)
+## Stage 3 Slice 1b — Community/Stream INTERNAL visual harmonization is deferred (structural integration is done)
 
-**Theme.** The theme foundation (`src/theme.js` + `src/themeProvider.jsx`, `--platform-*` CSS
-custom properties) themes the outer presentation surfaces — the global shell (GlobalSidebar +
-ShellHeader), PlatformShell, the temporary HomeDestination, and the Community **outer canvas**.
-It deliberately does NOT re-theme the Community interior: the `stream-chat-react` message
-surfaces, the Community `Sidebar`, the consultation bar, and the Community-scoped
-`:root{--primary-*}` block inside `CommunityDestination` keep their existing (light) styling. In
-Dark mode the themed shell therefore frames a still-light Community card.
+**Structural integration is complete (Slice 1b correction).** Community is now integrated into the
+global shell: the legacy rounded inset "app inside an app" card, its inset margin, and the
+duplicated organization-identity block were removed; the Community contextual rail is a secondary
+navigation surface consuming `--platform-*` tokens (with a subtle divider); the consultation bar is
+a restrained token-based treatment; and the two navigation layers are distinct with unambiguous
+accessible names ("Open global navigation" vs "Open Community channels"). The global sidebar
+answers "which area am I in?"; Community's own rail answers "which channel am I in?" — by design,
+and Community's channel navigation is NOT migrated into the global sidebar.
 
-**Nested navigation.** Slice 1b intentionally does NOT migrate Community's channel navigation into
-the global sidebar (that boundary is by design: the global sidebar answers "which area am I in?",
-Community's own sidebar answers "which channel am I in?"). While Community is the active area this
-produces a visible two-sidebar arrangement on desktop, and two independent drawers on mobile (the
-global-navigation drawer and Community's existing channel drawer, which have distinct triggers).
-This is the anticipated temporary effect, not a defect.
-
-Both are behavior-sensitive changes (third-party SDK CSS, contrast passes across every chat
-surface, and Community layout) reserved for the later **Community visual harmonization** slice.
-Close this entry when Community internals consume the semantic tokens, both themes are
-contrast-verified across the chat surfaces, and the area/channel navigation reads as one coherent
-system.
+**What remains deferred (later Community visual harmonization slice).** The Community INTERIOR is
+not yet fully theme-harmonized: the `stream-chat-react` message surfaces, the Community
+`Sidebar`'s per-item styling (channel-item and member-list colors — e.g. member names read low-
+contrast on the dark rail), and the Community-scoped `:root{--primary-*}` block keep literal
+(light-oriented) values, so in Dark mode the shell frames a still-light chat content area and some
+rail internals need contrast passes. Consultation remains a link-based bar (no Calendar-backed
+events yet). These are behavior-sensitive changes (third-party SDK CSS, per-surface contrast, and
+Community layout). Close this entry when Community internals consume the semantic tokens and both
+themes are contrast-verified across every chat/rail surface.

@@ -121,3 +121,46 @@ test('13. the Community mobile drawer and isMobile wiring are preserved', () => 
   const cd = fnBody(INDEX, 'CommunityDestination');
   assert.ok(cd.includes('mobileNavOpen') && cd.includes('setMobileNavOpen'), 'Community still owns mobile drawer state');
 });
+
+// ---- Stage 3 Slice 1b correction: Community integrates into the shell (no "app inside an app") ----
+test('14. the global shell owns organization identity — Community does not duplicate it', () => {
+  const sidebar = fnBody(INDEX, 'Sidebar');
+  assert.equal(sidebar.includes('APP_CONFIG.orgSubtitle'), false, 'no repeated org subtitle identity block in the Community rail');
+  assert.equal(sidebar.includes('APP_CONFIG.orgName'), false, 'no repeated org name identity block in the Community rail');
+  // a small contextual area label is acceptable in its place
+  assert.ok(sidebar.includes('>Community<'), 'Community rail begins with a compact contextual label');
+});
+
+test('15. the legacy inset "app card" wrapper is removed (the shell is the frame)', () => {
+  const cd = fnBody(INDEX, 'CommunityDestination');
+  assert.equal(/borderRadius: isMobile \? 0 : 18/.test(cd), false, 'no giant rounded inset container');
+  assert.equal(/boxShadow: isMobile \? 'none' : '0 24px 60px/.test(cd), false, 'no big legacy drop shadow around the Community container');
+  assert.equal(/padding: isMobile \? 0 : 14/.test(cd), false, 'no outer inset padding reinforcing the embedded-app look');
+});
+
+test('16. Community keeps its own channel navigation as a labelled landmark (not migrated to the global sidebar)', () => {
+  const sidebar = fnBody(INDEX, 'Sidebar');
+  assert.ok(/<nav aria-label="Community channels">/.test(sidebar), 'Community contextual nav is a labelled landmark');
+  assert.ok(/groups\.map\(group =>/.test(sidebar), 'channel groups remain Community-owned');
+  assert.ok(INDEX.includes('<Sidebar groups={APP_CONFIG.channelGroups}'), 'CommunityDestination still renders its own Sidebar');
+});
+
+test('17. the global and Community navigation controls have distinct, unambiguous accessible names', () => {
+  assert.ok(INDEX.includes('aria-label="Open Community channels"'), 'Community mobile control is named for channels');
+  const HEADER = readFileSync(new URL('./shellHeader.jsx', import.meta.url), 'utf8');
+  assert.ok(HEADER.includes('Open global navigation'), 'global control is named for global navigation');
+  assert.equal(INDEX.includes('Open global navigation'), false, 'Community control does not reuse the global label');
+});
+
+test('18. the consultation feature is intact but restyled into a restrained token-based treatment', () => {
+  const cd = fnBody(INDEX, 'CommunityDestination');
+  assert.ok(cd.includes('MHMS_ORG_CONFIG.consult.link'), 'consultation link/behavior unchanged (data from config)');
+  assert.ok(/var\(--platform-accent-soft/.test(cd), 'consult bar uses the semantic accent-soft token');
+  assert.equal(cd.includes('linear-gradient(135deg, #3a55d9 0%, #2f44b8 100%)'), false, 'no bright legacy gradient strip');
+});
+
+test('19. the Community contextual rail participates in the theme via --platform-* tokens', () => {
+  const sidebar = fnBody(INDEX, 'Sidebar');
+  assert.ok(/var\(--platform-canvas-subtle/.test(sidebar), 'rail background is a semantic surface token');
+  assert.ok(/var\(--platform-border-subtle/.test(sidebar), 'rail divider is a semantic border token');
+});

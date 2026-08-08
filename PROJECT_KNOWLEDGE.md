@@ -40,10 +40,16 @@ notes for the next session:
  `isMobile`), and it **closes the Stage-2 destination focus/aria-live debt**: on destination change
  it moves focus to the `<main>` landmark (post-mount only) and announces the area via a polite
  aria-live region; the mobile drawer is a modal dialog with Escape close, focus-in on open, and
- focus-return to the toggle. Community/runtime/auth untouched (App wiring `<PlatformShell
- config={orgConfig}>` unchanged); Community keeps its own channel navigation → a temporary
- nested-nav effect (documented in TECHNICAL_DEBT.md), harmonization deferred. Consumes `--platform-*`
- tokens (Light/Dark). No Workspace/Notes/Tasks/Learning/Calendar/Search/assistant/settings/persistence.
+ focus-return to the toggle. Community runtime/auth untouched (App wiring `<PlatformShell
+ config={orgConfig}>` unchanged). **Slice 1b correction (shell integration):** removed the legacy
+ rounded "app-inside-an-app" card + inset margin + duplicated org-identity block from Community;
+ the Community contextual rail is now a token-based secondary surface (`--platform-canvas-subtle`
+ + divider, labelled `<nav aria-label="Community channels">`, compact "COMMUNITY" label instead of
+ repeated identity); the consult bar is a restrained accent-soft treatment; the global vs Community
+ nav controls have distinct accessible names ("Open global navigation" vs "Open Community channels").
+ Community keeps its own channel navigation (by design). Consumes `--platform-*` tokens (Light/Dark).
+ Deferred: full Community/Stream INTERNAL visual harmonization (chat surfaces + rail item contrast in
+ dark) — see TECHNICAL_DEBT.md. No Workspace/Notes/Tasks/Learning/Calendar/Search/assistant/settings/persistence.
 - The Atlas AI agent is BUILT but ON HOLD and intentionally NOT in the repo. Jonathan wants to
  flesh out Atlas's scope before committing or wiring anything. Do not start Atlas work unless
  he raises it. See the Atlas section for why holding is deliberate (scope growth may require
